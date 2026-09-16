@@ -84,7 +84,7 @@ function render() {
 }
 
 function navigate(n) {
-  if (location.hash === '#draw') return;
+  if (['#draw', '#voice'].includes(location.hash)) return;
   generation++;
   running = false; executing = false; contextSending = false;
   phase = 0; executed = false; contextSent = false;
@@ -158,14 +158,14 @@ async function run() {
   }
 }
 document.addEventListener('keydown', e => {
-  if (location.hash === '#draw') return;
+  if (['#draw', '#voice'].includes(location.hash)) return;
   if ($('dialog[open]') || ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
   if (e.key === 'ArrowRight') { e.preventDefault(); navigate(step + 1); }
   if (e.key === 'ArrowLeft') { e.preventDefault(); navigate(step - 1); }
 });
 let touchStart;
 document.addEventListener('touchstart', e => {
-  if (location.hash === '#draw') { touchStart = null; return; }
+  if (['#draw', '#voice'].includes(location.hash)) { touchStart = null; return; }
   if (e.target.closest('button,a,dialog')) { touchStart = null; return; }
   touchStart = { x: e.touches[0].clientX, y: e.touches[0].clientY };
 }, { passive: true });
@@ -180,7 +180,7 @@ function route() {
   generation++;
   unmountDrawer?.();
   unmountDrawer = null;
-  if (location.hash === '#draw') unmountDrawer = mountDrawer($('#app'));
+  if (['#draw', '#voice'].includes(location.hash)) unmountDrawer = mountDrawer($('#app'), { voice: location.hash === '#voice' });
   else render();
 }
 window.addEventListener('hashchange', route);

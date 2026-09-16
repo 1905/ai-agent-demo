@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Added a Voice tab using the same SVG tools and canvas, with microphone controls in place of text input.
+- Copied microphone/audio playback helpers from `voice_chat_mcp` and adapted its Live speech plus Responses delegation flow.
+- Added server-owned voice configuration, local-key WebSocket proxy, graceful shutdown, and metadata-only session/model usage records.
+- Build and 17 automated tests pass. Live spoken red-circle → blue-circle flow passed with injected speech, canvas image checks, spoken replies, and persisted model usage.
+- Goodbye closed the Live session with confirmed final usage. Immediate shutdown can cut off farewell speech and leave the final delegated response usage unknown; records mark it incomplete.
+- Permission denial, Stop/navigation microphone cleanup, and mobile checks passed. Physical microphone/speaker hardware remains untested. The copied capture implementation uses deprecated `ScriptProcessorNode`.
+
 - Simplified drawing tool rows to the tool name and measured execution time. Removed arguments, shape details, and result text from the pane.
 - Removed empty-state slogans, helper text, and suggestion buttons from the drawer.
 - Added `read_canvas`: a full-canvas PNG and shape metadata returned to the model for visual inspection before and after drawing changes.

@@ -65,3 +65,17 @@ The Vite development and preview servers provide `/api/draw/status` and `/api/dr
 Backend request metadata is persisted in `.local/draw-api.jsonl`. Records contain route, status, duration, correlated provider response IDs, model, and provider usage when returned. They do not contain messages, drawing content, or credentials. Provider cost is recorded as unknown, not zero.
 
 The tool lesson follows two independent API requests. Amber cards represent structured tool calls; green cards represent tool results. The app resends instructions, tools, and full prior model output as context. Hosted conversation storage is an alternative to carrying history in the app; it still supplies context to each model call. See [conversation state](https://developers.openai.com/api/docs/guides/conversation-state).
+
+## Voice drawing
+
+Choose **Voice** after **Chat**, or open `/#voice`. Click **Start voice**, allow microphone access, and speak. The same SVG canvas and `create_svg`, `update_svg`, `read_svg`, and `read_canvas` tools are used. There is no text input in this mode. A short live caption shows the current speech. Stop, Reset, and leaving the view release the microphone and audio playback.
+
+The microphone and playback implementation comes from `voice_chat_mcp`. This app copies its microphone timeout/cancellation helpers and PCM playback worklet, and adapts its capture and Live delegation flow to the shared drawing tools.
+
+The Vite server proxies `/api/voice` to OpenAI Live over WebSocket. The project `.env` key stays on the server. `gpt-live-1` handles speech; `gpt-5.6-terra` handles drawing decisions. Set `OPENAI_VOICE_DRAW_MODEL` to override the drawing model. The key needs access to both models. Model settings and tool definitions are supplied by the server. No automatic reconnect occurs. Each voice session has a ten-minute limit.
+
+Tool outputs, including canvas images, return to the delegated model before continuation. The inspector keeps the latest 200 voice control events. Continuous audio packets and transcript fragments are excluded from that JSON view. Stop requests a graceful provider close; a timeout or dropped connection leaves final usage marked unconfirmed.
+
+Voice metadata is written to `.local/voice-api.jsonl`: session outcome/duration, correlated delegated model responses, returned usage, and tool names/timings. Audio, transcripts, tool arguments, and canvas images are excluded. Cost stays unknown unless available; final voice usage and delegated-model usage remain separate.
+
+References: [Live WebSockets](https://developers.openai.com/api/docs/guides/voice-websockets), [Live delegation and tools](https://developers.openai.com/api/docs/guides/live-delegation).

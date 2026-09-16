@@ -5,7 +5,7 @@ import { appendFile, mkdir } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 
-const instructions = `You are an SVG drawing assistant. Use only the supplied drawing tools.
+export const drawingInstructions = `You are an SVG drawing assistant. Use only the supplied drawing tools.
 The canvas is 640 by 640. Use create_svg to add shapes, read_canvas to see the whole drawing, read_svg for shape data only, and update_svg to modify existing shapes.
 For "draw a red circle", create a centered red circle, width and height 220. For "no, make it blue", read the drawing and update the same shape ID.
 Start each drawing request with read_canvas. It returns an image and current shape IDs. Plan placement around existing shapes. After a batch of additions or updates, call read_canvas again, inspect the image for unwanted overlap, spacing, colors and missing shapes, and fix problems before finishing. Do not claim you visually checked the result without a successful read_canvas after the latest change.
@@ -57,7 +57,7 @@ export function drawingApi(env = process.env, dependencies = {}) {
       record.provider = 'openai'; record.model = model;
       providerStarted = Date.now();
       const request = {
-        model, store: false, instructions, tools: drawingTools,
+        model, store: false, instructions: drawingInstructions, tools: drawingTools,
         input: body.input, include: ['reasoning.encrypted_content'],
         parallel_tool_calls: false, max_output_tokens: 2000,
       };

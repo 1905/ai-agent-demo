@@ -2,13 +2,15 @@ import './drawer.css';
 import { createDrawingStore, shapeMarkup, exportDrawing, COLORS, MAX_MODEL_CALLS } from './drawing-tools.js';
 import { captureCanvas, toolOutput } from './drawing-canvas.js';
 import { planDemo } from './drawing-demo.js';
-import { mountApiLog, resetApiLog, requestDrawing } from './drawing-log.js';
+import { mountApiLog, resetApiLog, requestDrawing, logVoiceEvent } from './drawing-log.js';
+import { VoiceSession } from './voice/session.js';
 
 const store = createDrawingStore();
 const escape = value => String(value).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const arrow = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M5 12h14m-6-6 6 6-6 6"/></svg>';
 let root, busy = false, session = 0, controller, mode = 'live', liveAvailable = false, checkingApi = true;
 let transcript = [], messages = [], events = [], requestCount = 0, nextCall = 0;
+let voiceView = false, voiceSession;
 const colorName = hex => Object.entries(COLORS).find(([, value]) => value === hex)?.[0] || hex;
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const find = selector => root?.querySelector(selector);
@@ -42,7 +44,14 @@ function paint() {
   find('#draw-send').disabled = busy || unavailable;
   find('#draw-prompt').disabled = busy;
   find('#draw-mode').disabled = busy;
-  find('#draw-status').textContent = busy ? 'Working…' : mode === 'demo' ? 'Demo · no LLM calls' : checkingApi ? 'Connecting to API…' : !liveAvailable ? 'Live · API unavailable' : `Live · ${requestCount} API ${requestCount === 1 ? 'call' : 'calls'}`;
+  find('#draw-status').textContent = voiceView ? '' : busy ? 'Working…' : mode === 'demo' ? 'Demo · no LLM calls' : checkingApi ? 'Connecting to API…' : !liveAvailable ? 'Live · API unavailable' : `Live · ${requestCount} API ${requestCount === 1 ? 'call' : 'calls'}`;
+  if (voiceView) {
+    const state = voiceSession?.state || 'idle';
+    find('#voice-button').disabled = unavailable || state === 'stopping';
+    find('#voice-button').dataset.state = state;
+    find('#voice-button').setAttribute('aria-label', state === 'idle' ? 'Start voice' : 'Stop voice');
+    find('#voice-state').textContent = { idle: 'Start voice', connecting: 'Connecting…', listening: 'Listening', stopping: 'Stopping…' }[state];
+  }
   for (const selector of ['#drawing-chat', '#drawing-calls']) { const pane = find(selector); pane.scrollTop = pane.scrollHeight; }
 }
 
@@ -129,19 +138,55 @@ async function submit(text) {
 }
 
 function reset() {
+  voiceSession?.dispose(); voiceSession = null;
   session++; controller?.abort(); busy = false; store.reset(); transcript = []; messages = []; events = []; requestCount = 0; nextCall = 0;
   resetApiLog();
+  if (voiceView) find('#voice-caption').textContent = '';
   find('#shape-layer').innerHTML = ''; find('#draw-error').textContent = ''; paint(); find('#draw-prompt').focus();
 }
 
-export function mountDrawer(container) {
+function toggleVoice() {
+  if (voiceSession && voiceSession.state !== 'idle') { session++; voiceSession.stop(); return; }
+  find('#draw-error').textContent = '';
+  const mounted = root;
+  let caption = '', speaker = '';
+  const current = () => root === mounted && voiceSession === connection;
+  const connection = new VoiceSession({
+    executeTool: async call => {
+      const token = session;
+      const result = await execute(call, token);
+      return token === session && result ? { output: toolOutput(result), failed: Boolean(result.error) } : null;
+    },
+    onState: state => {
+      if (!current()) return;
+      if (state === 'idle') { caption = ''; find('#voice-caption').textContent = ''; }
+      paint();
+    },
+    onError: message => { if (current()) find('#draw-error').textContent = message; },
+    onTranscript: (role, delta) => {
+      if (!current()) return;
+      if (role !== speaker || caption.length > 300) caption = '';
+      speaker = role; caption += delta;
+      find('#voice-caption').textContent = caption;
+    },
+    onEvent: (direction, event) => { if (current()) logVoiceEvent(direction, event); },
+    onLevel: level => { if (current()) find('#voice-button').style.setProperty('--voice-level', level); },
+  });
+  voiceSession = connection;
+  connection.start();
+}
+
+export function mountDrawer(container, options = {}) {
   root = container;
+  voiceView = options.voice === true;
+  if (voiceView) mode = 'live';
   checkingApi = true;
-  root.innerHTML = `<header class="draw-header"><a href="#" class="brand"><span class="brand-mark"></span>agent lab</a><nav class="view-switch" aria-label="Views"><a href="#">Lesson</a><a href="#draw" aria-current="page">Draw</a></nav><select id="draw-mode" aria-label="Model mode"><option value="demo">Demo</option><option value="live" disabled>Live · key needed</option></select></header><main class="drawer-main"><div class="draw-intro"><h1>Draw</h1><button id="draw-reset" type="button">Reset</button></div><div class="drawer-grid"><section class="draw-chat-column" aria-labelledby="chat-title"><div class="draw-column-title"><h2 id="chat-title">Chat</h2>${arrow}</div><div id="drawing-chat" class="draw-scroll" role="log" aria-label="Conversation"></div><form id="draw-form"><label class="sr-only" for="draw-prompt">Tell the agent what to draw</label><textarea id="draw-prompt" rows="2" maxlength="2000" placeholder="Draw a red circle…"></textarea><button id="draw-send" type="submit" aria-label="Send message">${arrow}</button></form><p id="draw-error" role="alert"></p></section><section class="draw-calls-column" aria-labelledby="calls-title"><div class="draw-column-title"><h2 id="calls-title">Tool calls</h2>${arrow}</div><div id="drawing-calls" class="draw-scroll" role="log" aria-label="Tool calls"></div><span id="draw-status" class="draw-status"></span></section><section class="draw-canvas-column" aria-labelledby="canvas-title"><div class="draw-column-title"><h2 id="canvas-title">Drawing</h2><button id="draw-export" type="button">Save SVG ↓</button></div><div class="drawing-square"><svg id="drawing-svg" viewBox="0 0 640 640" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Your SVG drawing"><g id="shape-layer"></g></svg></div></section></div><section id="api-log" class="api-log" aria-label="Raw API log"></section></main>`;
+  root.innerHTML = `<header class="draw-header"><a href="#" class="brand"><span class="brand-mark"></span>agent lab</a><nav class="view-switch" aria-label="Views"><a href="#">Lesson</a><a href="#draw" ${voiceView ? '' : 'aria-current="page"'}>Chat</a><a href="#voice" ${voiceView ? 'aria-current="page"' : ''}>Voice</a></nav><select id="draw-mode" aria-label="Model mode" ${voiceView ? 'hidden' : ''}><option value="demo">Demo</option><option value="live" disabled>Live · key needed</option></select></header><main class="drawer-main"><div class="draw-intro"><h1>${voiceView ? 'Voice' : 'Draw'}</h1><button id="draw-reset" type="button">Reset</button></div><div class="drawer-grid"><section class="draw-chat-column" aria-labelledby="chat-title"><div class="draw-column-title"><h2 id="chat-title">${voiceView ? 'Voice' : 'Chat'}</h2>${arrow}</div><div id="drawing-chat" ${voiceView ? 'hidden' : ''} class="draw-scroll" role="log" aria-label="Conversation"></div>${voiceView ? `<div class="voice-panel"><button type="button" id="voice-button" aria-label="Start voice"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3m-3 0h6"/></svg></button><span id="voice-state" role="status">Start voice</span><p id="voice-caption" aria-live="polite"></p></div>` : ''}<form id="draw-form" ${voiceView ? 'hidden' : ''}><label class="sr-only" for="draw-prompt">Tell the agent what to draw</label><textarea id="draw-prompt" rows="2" maxlength="2000" placeholder="Draw a red circle…"></textarea><button id="draw-send" type="submit" aria-label="Send message">${arrow}</button></form><p id="draw-error" role="alert"></p></section><section class="draw-calls-column" aria-labelledby="calls-title"><div class="draw-column-title"><h2 id="calls-title">Tool calls</h2>${arrow}</div><div id="drawing-calls" class="draw-scroll" role="log" aria-label="Tool calls"></div><span id="draw-status" class="draw-status"></span></section><section class="draw-canvas-column" aria-labelledby="canvas-title"><div class="draw-column-title"><h2 id="canvas-title">Drawing</h2><button id="draw-export" type="button">Save SVG ↓</button></div><div class="drawing-square"><svg id="drawing-svg" viewBox="0 0 640 640" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Your SVG drawing"><g id="shape-layer"></g></svg></div></section></div><section id="api-log" class="api-log" aria-label="Raw API log"></section></main>`;
   mountApiLog(find('#api-log'));
   find('#draw-form').onsubmit = event => { event.preventDefault(); submit(find('#draw-prompt').value); };
   find('#draw-prompt').onkeydown = event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); submit(event.currentTarget.value); } };
   find('#draw-reset').onclick = reset;
+  if (voiceView) find('#voice-button').onclick = toggleVoice;
   find('#draw-mode').onchange = event => { mode = event.target.value; reset(); };
   find('#draw-export').onclick = () => {
     const link = document.createElement('a'); link.href = URL.createObjectURL(new Blob([exportDrawing(store.read())], { type: 'image/svg+xml' })); link.download = 'agent-drawing.svg'; link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 1000);
@@ -170,5 +215,5 @@ export function mountDrawer(container) {
     if (mode === 'live') find('#draw-error').textContent = 'The drawing API is unavailable. Start the project server and reload.';
     paint();
   });
-  return () => { session++; controller?.abort(); resizeObserver.disconnect(); busy = false; root = null; };
+  return () => { voiceSession?.dispose(); voiceSession = null; session++; controller?.abort(); resizeObserver.disconnect(); busy = false; root = null; };
 }

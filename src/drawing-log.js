@@ -13,7 +13,7 @@ export function highlightJson(value) {
 function paint() {
   if (!root?.isConnected) return;
   const entry = entries[selected];
-  root.innerHTML = `<div class="api-log-toolbar"><h2>API log</h2><div class="api-log-calls" aria-label="API calls">${entries.map((item, index) => `<button type="button" data-call="${index}" aria-pressed="${index === selected}">${index + 1}</button>`).join('')}</div></div>${entry ? `<div class="api-log-controls"><div class="api-log-tabs" aria-label="JSON view"><button type="button" data-side="request" aria-pressed="${side === 'request'}">Request</button><button type="button" data-side="response" aria-pressed="${side === 'response'}">Response</button></div><span class="api-log-meta">${escape(entry.endpoint)}${entry.status ? ` · ${entry.status} · ${(entry.duration / 1000).toFixed(2)} s` : ' · …'}</span><button type="button" id="copy-api-json">Copy</button></div><pre tabindex="0" aria-label="${side === 'request' ? 'Request' : 'Response'} JSON"><code>${side === 'response' && !entry.response ? '…' : highlightJson(entry[side])}</code></pre>` : ''}`;
+  root.innerHTML = `<div class="api-log-toolbar"><h2>API log</h2><div class="api-log-calls" aria-label="API calls">${entries.map((item, index) => `<button type="button" data-call="${index}" aria-pressed="${index === selected}">${index + 1}</button>`).join('')}</div></div>${entry ? `<div class="api-log-controls"><div class="api-log-tabs" aria-label="JSON view"><button type="button" data-side="request" aria-pressed="${side === 'request'}">Request</button><button type="button" data-side="response" aria-pressed="${side === 'response'}">Response</button></div><span class="api-log-meta">${escape(entry.endpoint)}${entry.status ? ` · ${entry.status}${entry.duration == null ? '' : ` · ${(entry.duration / 1000).toFixed(2)} s`}` : ' · …'}</span><button type="button" id="copy-api-json">Copy</button></div><pre tabindex="0" aria-label="${side === 'request' ? 'Request' : 'Response'} JSON"><code>${side === 'response' && !entry.response ? '…' : highlightJson(entry[side])}</code></pre>` : ''}`;
   root.querySelectorAll('[data-call]').forEach(button => button.onclick = () => { selected = Number(button.dataset.call); paint(); });
   root.querySelectorAll('[data-side]').forEach(button => button.onclick = () => { side = button.dataset.side; paint(); });
   const copy = root.querySelector('#copy-api-json');
@@ -25,6 +25,12 @@ function paint() {
 
 export function mountApiLog(container) { root = container; paint(); }
 export function resetApiLog() { entries = []; selected = 0; side = 'request'; paint(); }
+export function logVoiceEvent(direction, event) {
+  entries.push({ request: direction === 'request' ? event : null, response: direction === 'response' ? event : null, endpoint: `WS · ${event.type}`, status: direction === 'request' ? 'Sent' : 'Received', duration: null });
+  // Audio frames and transcript fragments are handled by the voice UI, not this inspector.
+  if (entries.length > 200) entries.shift();
+  selected = entries.length - 1; side = direction; paint();
+}
 
 export async function requestDrawing(input, signal) {
   const entry = { request: structuredClone({ input }), response: null, endpoint: '/api/draw/turn', status: null };
