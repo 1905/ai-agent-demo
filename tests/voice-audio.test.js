@@ -7,6 +7,20 @@ test('voice capture converts clipped samples to mono PCM16 at 24 kHz', () => {
   assert.deepEqual([...pcm16(new Float32Array([0, 1, -1]), 24000)], [0, 32767, -32768]);
 });
 
+test('Voice never executes disabled tools, including end_conversation', async () => {
+  const sent = [], selected = [];
+  const voice = new VoiceSession({ enabledTools: selected, onState() {}, onEvent() {}, onError: error => assert.fail(error), executeTool: () => assert.fail('Disabled tool executed') });
+  selected.push('draw_js');
+  voice.state = 'listening';
+  voice.send = event => sent.push(event);
+  for (const name of ['draw_js', 'end_conversation']) {
+    voice.receive({ type: 'response.event', event: { type: 'response.output_item.done', item: { type: 'function_call', name, call_id: name, arguments: '{}' } } }, voice.generation);
+  }
+  await voice.toolQueue;
+  assert.equal(sent.length, 2);
+  assert.ok(sent.every(event => event.failed && JSON.parse(event.output).error));
+});
+
 test('mic mute sends silence while playback and tool calls keep working', async () => {
   const sent = [], levels = [], playback = [], tools = [];
   const voice = new VoiceSession({

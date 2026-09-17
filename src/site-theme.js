@@ -93,9 +93,10 @@ export async function executeThemeTool(name, args, isCurrent = () => true) {
 export function bindThemeControls() {
   document.querySelectorAll('[data-reset-theme]').forEach(button => {
     button.onclick = async () => {
+      button.dataset.resetLabel ||= button.textContent;
       button.disabled = true;
-      try { await resetSiteCss(); button.textContent = 'Reset theme'; button.removeAttribute('title'); }
-      catch (error) { button.textContent = 'Reset failed'; button.title = error.message; }
+      try { await resetSiteCss(); button.textContent = button.dataset.resetLabel; button.removeAttribute('title'); }
+      catch (error) { button.textContent = document.documentElement.lang === 'ru' ? 'Ошибка сброса' : 'Reset failed'; button.title = error.message; }
       finally { button.disabled = false; }
     };
   });

@@ -1,12 +1,15 @@
 import { createDrawingStore, shapeMarkup, exportDrawing, COLORS, MAX_MODEL_CALLS } from './drawing-tools.js';
 import { captureCanvas, toolOutput } from './drawing-canvas.js';
+import { artworkTools } from './artwork-tools.js';
+import { renderArtwork } from './drawing-artwork.js';
 import { planDemo } from './drawing-demo.js';
 import { mountApiLog, resetApiLog, requestDrawing, logVoiceEvent } from './drawing-log.js';
 import { VoiceSession } from './voice/session.js';
 import { mountVoiceBubble } from './voice/bubble.js';
 import { themeTools } from './theme-tools.js';
 import { executeThemeTool, bindThemeControls } from './site-theme.js';
-import { getThinkingModel, settingsButton, mountSettings } from './settings.js';
+import { getThinkingModel, getReasoningEffort, settingsButton, mountSettings } from './settings.js';
+import { getEnabledTools, mountToolSettings } from './tool-settings.js';
 
 const store = createDrawingStore();
 const escape = value => String(value).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -14,7 +17,7 @@ const arrow = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke
 const micIcon = muted => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3m-3 0h6"/>${muted ? '<path d="m3 3 18 18"/>' : ''}</svg>`;
 let root, busy = false, session = 0, controller, mode = 'live', liveAvailable = false, checkingApi = true;
 let transcript = [], messages = [], events = [], requestCount = 0, nextCall = 0;
-let voiceView = false, voiceSession;
+let voiceView = false, voiceSession, drawingController;
 const colorName = hex => Object.entries(COLORS).find(([, value]) => value === hex)?.[0] || hex;
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const find = selector => root?.querySelector(selector);
@@ -22,11 +25,13 @@ const find = selector => root?.querySelector(selector);
 const durationText = ms => ms < 1 ? '<1 ms' : ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`;
 function resultText(result) {
   if (result.error) return result.error;
+  if (result.action === 'drawn') return 'Drawing updated.';
   if (result.view && result.imageUrl) return 'Page screenshot captured.';
   if (result.action === 'theme_updated') return 'Theme updated.';
   if (result.action === 'theme_reset') return 'Original theme restored.';
   if (result.css) return 'Site stylesheet read.';
-  if (result.imageUrl) return `Canvas checked. ${result.shapes.length} ${result.shapes.length === 1 ? 'shape' : 'shapes'}.`;
+  if (result.imageUrl) return result.artwork ? 'Drawing checked.' : `Canvas checked. ${result.shapes.length} ${result.shapes.length === 1 ? 'shape' : 'shapes'}.`;
+  if (result.artwork) return 'Drawing source read.';
   if (result.shapes) return result.shapes.length ? result.shapes.map(shape => `${shape.id} · ${colorName(shape.fill)} ${shape.shape}`).join(' / ') : 'Canvas is empty';
   return `${result.shape.id} ${result.action} · ${colorName(result.shape.fill)}`;
 }
@@ -37,6 +42,16 @@ function paint() {
   const snapshot = store.read();
   // Preserve SVG nodes so changing a fill visibly updates the same circle.
   const layer = find('#shape-layer');
+  for (const node of [...layer.children]) if (!snapshot.shapes.some(shape => shape.id === node.dataset.shapeId)) node.remove();
+  let artwork = find('#artwork-layer');
+  if (snapshot.artwork) {
+    if (!artwork) {
+      artwork = document.createElementNS('http://www.w3.org/2000/svg', 'image');
+      artwork.id = 'artwork-layer'; artwork.setAttribute('width', '640'); artwork.setAttribute('height', '640');
+      layer.before(artwork);
+    }
+    if (artwork.getAttribute('href') !== snapshot.artwork.imageUrl) artwork.setAttribute('href', snapshot.artwork.imageUrl);
+  } else artwork?.remove();
   for (const shape of snapshot.shapes) {
     const previous = layer.querySelector(`[data-shape-id="${shape.id}"]`);
     if (!previous) layer.insertAdjacentHTML('beforeend', shapeMarkup(shape));
@@ -47,7 +62,8 @@ function paint() {
       else { previous.setAttribute('x', shape.x - shape.width / 2); previous.setAttribute('y', shape.y - shape.height / 2); previous.setAttribute('width', shape.width); previous.setAttribute('height', shape.height); }
     }
   }
-  find('#draw-export').disabled = snapshot.shapes.length === 0;
+  find('#draw-export').disabled = snapshot.shapes.length === 0 && !snapshot.artwork;
+  find('#draw-export').textContent = snapshot.artwork?.type === 'js' ? 'Save PNG ↓' : 'Save SVG ↓';
   const unavailable = (voiceView || mode === 'live') && (!liveAvailable || checkingApi);
   find('#draw-send').disabled = busy || unavailable;
   find('#draw-prompt').disabled = busy;
@@ -70,7 +86,7 @@ function paint() {
   for (const selector of ['#drawing-chat', '#drawing-calls']) { const pane = find(selector); pane.scrollTop = pane.scrollHeight; }
 }
 
-async function execute(call, token) {
+async function execute(call, token, enabledTools) {
   if (token !== session) return null;
   let args;
   try { args = typeof call.arguments === 'string' ? JSON.parse(call.arguments) : call.arguments; }
@@ -85,10 +101,18 @@ async function execute(call, token) {
   const started = performance.now();
   try {
     if (invalidArgs) throw new Error('Tool arguments must be an object.');
+    if (!enabledTools.includes(call.name)) throw new Error(`${call.name} is disabled in Tool settings.`);
     if (themeTools.some(tool => tool.name === call.name)) event.result = await executeThemeTool(call.name, args, () => token === session);
+    else if (artworkTools.some(tool => tool.name === call.name)) {
+      drawingController = new AbortController();
+      const artwork = await renderArtwork(call.name, args, drawingController.signal);
+      if (token !== session) return null;
+      event.result = store.replaceArtwork(artwork);
+    }
     else {
       event.result = store.execute(call.name, args);
       if (call.name === 'read_canvas') event.result.imageUrl = await captureCanvas(event.result);
+      if (event.result.artwork) delete event.result.artwork.imageUrl;
     }
     event.status = 'done';
   }
@@ -105,6 +129,8 @@ async function submit(text) {
   if (text.length > 2000) { find('#draw-error').textContent = 'Keep the message under 2,000 characters.'; return; }
   const token = session;
   const model = getThinkingModel();
+  const reasoningEffort = getReasoningEffort();
+  const enabledTools = getEnabledTools();
   busy = true; find('#draw-error').textContent = ''; find('#draw-prompt').value = '';
   messages.push({ role: 'user', text }); paint();
   try {
@@ -112,7 +138,7 @@ async function submit(text) {
       const plan = planDemo(text, store.read());
       let failure;
       for (const call of plan.calls) {
-        const result = await execute(call, token);
+        const result = await execute(call, token, enabledTools);
         if (token !== session) return;
         if (result?.error) { failure = result.error; break; }
       }
@@ -130,7 +156,7 @@ async function submit(text) {
       for (let round = 0; round < MAX_MODEL_CALLS; round++) {
         controller = new AbortController();
         requestCount++; paint();
-        const data = await requestDrawing(transcript, controller.signal, model);
+        const data = await requestDrawing(transcript, controller.signal, model, reasoningEffort, enabledTools);
         if (token !== session) return;
         transcript.push(...data.inputItems);
         const calls = data.calls;
@@ -141,7 +167,7 @@ async function submit(text) {
           completed = true; break;
         }
         for (const call of calls) {
-          const result = await execute(call, token);
+          const result = await execute(call, token, enabledTools);
           if (token !== session) return;
           transcript.push({ type: 'function_call_output', call_id: call.call_id, output: toolOutput(result) });
         }
@@ -158,23 +184,26 @@ async function submit(text) {
 
 function reset() {
   voiceSession?.dispose(); voiceSession = null;
-  session++; controller?.abort(); busy = false; store.reset(); transcript = []; messages = []; events = []; requestCount = 0; nextCall = 0;
+  session++; controller?.abort(); drawingController?.abort(); busy = false; store.reset(); transcript = []; messages = []; events = []; requestCount = 0; nextCall = 0;
   resetApiLog();
   if (voiceView) find('#voice-caption').textContent = '';
   find('#shape-layer').innerHTML = ''; find('#draw-error').textContent = ''; paint(); find('#draw-prompt').focus();
 }
 
 function toggleVoice() {
-  if (voiceSession && voiceSession.state !== 'idle') { session++; voiceSession.stop(); return; }
+  if (voiceSession && voiceSession.state !== 'idle') { session++; drawingController?.abort(); voiceSession.stop(); return; }
   find('#draw-error').textContent = '';
   const mounted = root;
   let caption = '', speaker = '';
+  const enabledTools = getEnabledTools();
   const current = () => root === mounted && voiceSession === connection;
   const connection = new VoiceSession({
     model: getThinkingModel(),
+    reasoningEffort: getReasoningEffort(),
+    enabledTools,
     executeTool: async call => {
       const token = session;
-      const result = await execute(call, token);
+      const result = await execute(call, token, enabledTools);
       return token === session && result ? { output: toolOutput(result), failed: Boolean(result.error) } : null;
     },
     onState: state => {
@@ -211,6 +240,7 @@ export function mountDrawer(container, options = {}) {
     };
   }
   mountSettings(root);
+  mountToolSettings(root, { voiceConnected: () => Boolean(voiceSession && voiceSession.state !== 'idle') });
   bindThemeControls();
   find('#draw-form').onsubmit = event => { event.preventDefault(); submit(find('#draw-prompt').value); };
   find('#draw-prompt').onkeydown = event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); submit(event.currentTarget.value); } };
@@ -218,8 +248,15 @@ export function mountDrawer(container, options = {}) {
   if (voiceView) find('#voice-button').onclick = toggleVoice;
   const unmountBubble = voiceView ? mountVoiceBubble(find('#voice-bubble'), () => voiceSession) : null;
   find('#draw-mode').onchange = event => { mode = event.target.value; reset(); };
-  find('#draw-export').onclick = () => {
-    const link = document.createElement('a'); link.href = URL.createObjectURL(new Blob([exportDrawing(store.read())], { type: 'image/svg+xml' })); link.download = 'agent-drawing.svg'; link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+  find('#draw-export').onclick = async () => {
+    try {
+      const snapshot = store.read();
+      const png = snapshot.artwork?.type === 'js';
+      const link = document.createElement('a');
+      link.href = png ? await captureCanvas(snapshot) : URL.createObjectURL(new Blob([exportDrawing(snapshot)], { type: 'image/svg+xml' }));
+      link.download = `agent-drawing.${png ? 'png' : 'svg'}`; link.click();
+      if (!png) setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+    } catch (error) { find('#draw-error').textContent = error.message; }
   };
   // Chat and Voice share this store. View changes preserve shapes and Chat's mode.
   find('#draw-mode').value = mode;
@@ -245,5 +282,5 @@ export function mountDrawer(container, options = {}) {
     if (voiceView || mode === 'live') find('#draw-error').textContent = 'The drawing API is unavailable. Start the project server and reload.';
     paint();
   });
-  return () => { unmountBubble?.(); voiceSession?.dispose(); voiceSession = null; session++; controller?.abort(); resizeObserver.disconnect(); busy = false; root = null; };
+  return () => { unmountBubble?.(); voiceSession?.dispose(); voiceSession = null; session++; controller?.abort(); drawingController?.abort(); resizeObserver.disconnect(); busy = false; root = null; };
 }

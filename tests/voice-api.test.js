@@ -60,6 +60,7 @@ test('voice defaults to Terra with server-owned speech and tools; image outputs 
   const configuration = sent.find(event => event.type === 'session.start').session;
   assert.deepEqual(configuration, voiceSessionConfig({}));
   assert.equal(configuration.delegation.responses.model, 'gpt-5.6-terra');
+  assert.deepEqual(configuration.delegation.responses.reasoning, { effort: 'medium' });
   assert.deepEqual(configuration.delegation.responses.tools.slice(0, -1), agentTools);
   assert.equal(configuration.delegation.responses.parallel_tool_calls, false);
   send(client, { type: 'session.update', session: { delegation: { responses: { model: 'override' } } } });
@@ -112,6 +113,70 @@ test('invalid voice thinking model never opens a provider connection', async t =
   send(client, { type: 'session.start', model: 'not-allowed' });
   await until(() => received.find(event => event.type === 'voice.ended'));
   assert.match(received.find(event => event.type === 'error').error.message, /Settings/);
+  assert.equal(sent.length, 0);
+});
+
+test('Voice freezes selected tools at connection start and All off removes every tool', async t => {
+  for (const enabledTools of [[], ['draw_js'], ['read_canvas', 'end_conversation']]) {
+    const { client, sent, received } = await setup(t, (socket, event) => {
+      if (event.type === 'session.start') startProvider(socket);
+      if (event.type === 'session.close') send(socket, { type: 'session.closed' });
+    });
+    send(client, { type: 'session.start', enabledTools });
+    await until(() => received.some(event => event.type === 'session.started'));
+    const config = sent[0].session;
+    assert.deepEqual(config.delegation.responses.tools.map(tool => tool.name), enabledTools);
+    if (!enabledTools.length) assert.match(config.delegation.responses.instructions, /No tools are available/);
+    send(client, { type: 'session.update', enabledTools: ['draw_svg'] });
+    send(client, { type: 'session.close' });
+    await until(() => received.some(event => event.type === 'voice.ended'));
+    assert.equal(sent.some(event => event.type === 'session.update'), false);
+  }
+});
+
+test('invalid Voice tool selection never reaches the provider', async t => {
+  const { client, sent, received } = await setup(t, () => assert.fail('Provider must not receive a request'));
+  send(client, { type: 'session.start', enabledTools: ['invented_tool'] });
+  await until(() => received.some(event => event.type === 'voice.ended'));
+  assert.match(received.find(event => event.type === 'error').error.message, /Tool settings/);
+  assert.equal(sent.length, 0);
+});
+
+test('Voice rejects a provider call for a disabled tool before forwarding it', async t => {
+  const { client, sent, received } = await setup(t, (socket, event) => {
+    if (event.type === 'session.start') {
+      startProvider(socket);
+      send(socket, { type: 'response.event', event: { type: 'response.output_item.done', item: { type: 'function_call', name: 'draw_js', call_id: 'disabled', arguments: '{}' } } });
+    }
+    if (event.type === 'session.close') send(socket, { type: 'session.closed' });
+  });
+  send(client, { type: 'session.start', enabledTools: [] });
+  await until(() => received.some(event => event.type === 'voice.ended'));
+  assert.match(received.find(event => event.type === 'error').error.message, /disabled/);
+  assert.equal(received.some(event => event.event?.item?.call_id === 'disabled'), false);
+  assert.equal(sent.some(event => event.type === 'response.item.create'), false);
+});
+
+test('Luna and Sol voice sessions receive the selected reasoning effort', async t => {
+  for (const model of ['gpt-5.6-luna', 'gpt-5.6-sol']) {
+    const { client, sent, received } = await setup(t, (socket, event) => {
+      if (event.type === 'session.start') startProvider(socket);
+      if (event.type === 'session.close') send(socket, { type: 'session.closed' });
+    });
+    send(client, { type: 'session.start', model, reasoningEffort: 'high' });
+    await until(() => received.some(event => event.type === 'session.started'));
+    assert.equal(sent[0].session.delegation.responses.model, model);
+    assert.deepEqual(sent[0].session.delegation.responses.reasoning, { effort: 'high' });
+    send(client, { type: 'session.close' });
+    await until(() => received.some(event => event.type === 'voice.ended'));
+  }
+});
+
+test('invalid voice reasoning effort never reaches the provider', async t => {
+  const { client, sent, received } = await setup(t, () => assert.fail('Provider must not receive a request'));
+  send(client, { type: 'session.start', reasoningEffort: 'invented' });
+  await until(() => received.some(event => event.type === 'voice.ended'));
+  assert.match(received.find(event => event.type === 'error').error.message, /reasoning effort/);
   assert.equal(sent.length, 0);
 });
 

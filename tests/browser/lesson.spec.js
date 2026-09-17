@@ -1,162 +1,131 @@
 import { test, expect } from '@playwright/test';
+import { weatherToolResult } from '../../src/lesson.js';
 
-const stages = ['intro', 'text', 'history', 'api', 'define', 'tool-call', 'execute', 'context', 'new-call', 'answer', 'loop', 'end'];
-const advance = async (page, count = 1) => {
-  for (let i = 0; i < count; i++) await page.locator('#next').click();
-};
+const stages = ['text', 'define', 'tool-call', 'execute', 'weather', 'weather-call', 'weather-run', 'weather-result', 'answer'];
+const go = (page, stage) => page.locator(`[data-page="${stages.indexOf(stage)}"]`).click();
+const noExtraControls = '#execute-tool, #send-context, #replay-exchange, #download, #sources';
 
-test('tool calling carries explicit context into a new request and produces a text answer', async ({ page }) => {
+test.beforeEach(async ({ page }) => {
+  await page.route('**/api/draw/turn', route => route.abort());
+  await page.addInitScript(() => {
+    const NativeWebSocket = WebSocket;
+    window.WebSocket = class extends NativeWebSocket {
+      constructor(url, ...args) {
+        if (new URL(url, location.href).pathname === '/api/voice') throw new Error('Voice is blocked in lesson tests');
+        super(url, ...args);
+      }
+    };
+  });
+});
+
+test('nine-step lesson progresses from a command to weather data with Next alone', async ({ page }) => {
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.goto('/');
-  await expect(page.locator('h1')).toHaveText('From chat to action.');
-  expect(await page.evaluate(() => getComputedStyle(document.documentElement).backgroundColor)).toBe('rgb(12, 13, 15)');
-
-  await advance(page);
-  await expect(page.locator('.response')).toContainText('Red.');
-  await advance(page);
-  for (let i = 0; i < 4; i++) {
-    await page.locator(`[data-year="${i}"]`).click();
-    await expect(page.locator('.history-detail h2')).not.toBeEmpty();
+  await expect(page.locator('[data-page]')).toHaveCount(9);
+  await expect(page.locator('html')).toHaveAttribute('lang', 'ru');
+  await expect(page.locator('.chat-reply')).toHaveAttribute('aria-hidden', 'false');
+  await expect(page.locator('.chat-reply')).toContainText('Красный.');
+  for (const [index, stage] of stages.entries()) {
+    if (index) await page.locator('#next').click();
+    await expect(page.locator(`.lesson-stage.${stage}`)).toBeVisible();
+    await expect(page.locator(noExtraControls)).toHaveCount(0);
+    await expect(page.locator('.lesson-stage .model-orb, .lesson-chat-model')).toHaveCount(0);
+    if (['define', 'weather'].includes(stage)) {
+      await expect(page.locator('.lesson-chat-message')).toHaveAttribute('data-speaker', 'user');
+      await expect(page.locator('.lesson-available-tool')).toContainText(stage === 'define' ? 'draw_circle' : 'get_weather');
+    }
+    if (['tool-call', 'weather-call'].includes(stage)) {
+      expect(await page.locator('.lesson-chat-message').evaluateAll(nodes => nodes.map(n => n.dataset.speaker))).toEqual(['user', 'ai']);
+      await expect(page.locator('.tool-message')).toContainText('вызов инструмента');
+    }
+    if (['execute', 'weather-run'].includes(stage)) {
+      await expect(page.locator('.lesson-function-panel')).toHaveClass(/is-complete/);
+      await expect(page.locator('.lesson-function-panel .lesson-chat-message, .lesson-function-panel .lesson-avatar, .lesson-function-panel button')).toHaveCount(0);
+      if (stage === 'execute') await expect(page.locator('.lesson-canvas circle')).toHaveAttribute('fill', '#ef5350');
+      else {
+        const result = JSON.parse(await page.locator('.lesson-weather-json code').innerText());
+        expect(result).toEqual(weatherToolResult);
+        await expect(page.locator('.lesson-fixture')).toHaveText('Учебные данные');
+      }
+    }
+    if (stage === 'weather-result') {
+      await expect(page.locator('.return-request')).toHaveAttribute('data-speaker', 'code');
+      await expect(page.locator('.return-request')).toContainText('API-запрос 2 → ИИ');
+      await expect(page.locator('.lesson-original-question')).toHaveText('Нужен ли зонт в Москве?');
+      await expect(page.locator('.lesson-carried-call')).toContainText('get_weather · Москва');
+      expect(JSON.parse(await page.locator('.lesson-weather-json code').innerText())).toEqual(weatherToolResult);
+    }
+    if (stage === 'answer') {
+      await expect(page.locator('.chat-reply')).toHaveAttribute('aria-hidden', 'false');
+      await expect(page.locator('.chat-reply')).toContainText('Да, возьмите зонт. В Москве дождь, +12 °C.');
+      await expect(page.locator('#next')).toContainText('Сначала');
+    }
   }
-  await page.locator('[data-year="0"]').focus();
-  await page.keyboard.press('ArrowRight');
-  await expect(page.locator('[data-year="1"]')).toBeFocused();
-  await expect(page.locator('.lesson-stage.history')).toBeVisible();
-
-  await advance(page);
-  await expect(page.locator('.request-lane')).toContainText('Suggest a color for a circle');
-  await expect(page.locator('.response-lane')).toBeVisible({ timeout: 5000 });
-  await expect(page.locator('.response-lane')).toContainText('Red.');
-  await page.locator('#replay-exchange').click();
-  await expect(page.locator('.response-lane')).toBeHidden();
-  await expect(page.locator('.response-lane')).toBeVisible({ timeout: 5000 });
-
-  await advance(page);
-  await expect(page.locator('.lesson-stage.define')).toContainText('create_svg');
-  await expect(page.locator('.lesson-stage.define')).toContainText(/request/i);
-  await advance(page);
-  await expect(page.locator('.lesson-stage.tool-call')).toContainText(/tool call/i);
-  await expect(page.locator('.tool-call-card')).toContainText('create_svg');
-  await expect(page.locator('.tool-call-card')).toContainText('Circle');
-
-  await advance(page);
-  await expect(page.locator('.lesson-stage.execute')).toContainText(/your code/i);
-  await expect(page.locator('.lesson-stage.execute')).toContainText(/create_svg/i);
-  await expect(page.locator('.tool-observation')).not.toBeVisible();
-  await expect(page.locator('.lesson-canvas circle')).toHaveCount(0);
-  await page.locator('#execute-tool').click();
-  await expect(page.locator('.tool-observation')).toBeVisible();
-  await expect(page.locator('.tool-observation')).toContainText(/shape-1 created/);
-
-  await advance(page);
-  const context = page.locator('.context-row');
-  await expect(context).toHaveCount(4);
-  await expect(context.nth(0)).toContainText(/tool|instruction|system/i);
-  await expect(context.nth(1)).toContainText(/user|circle/i);
-  await expect(context.nth(2)).toContainText(/create_svg|tool call/i);
-  await expect(context.nth(3)).toContainText(/shape-1 created/);
-  const carriedContext = await context.allTextContents();
-
-  await advance(page);
-  await expect(page.locator('main')).toContainText(/no memory/i);
-  expect(await page.locator('.context-row').allTextContents()).toEqual(carriedContext);
-  await expect(page.locator('.context-received')).not.toBeVisible();
-  await page.locator('#send-context').click();
-  await expect(page.locator('.context-received')).toBeVisible({ timeout: 5000 });
-
-  await advance(page);
-  await expect(page.locator('.lesson-stage.answer .response-lane')).toBeVisible({ timeout: 5000 });
-  await expect(page.locator('.lesson-stage.answer .response-lane')).toContainText(/Drew a red circle/);
-  await expect(page.locator('.lesson-stage.answer')).toContainText(/text/i);
-
-  await advance(page);
-  await page.locator('#run-loop').click();
-  await expect(page.locator('.loop-output')).toContainText('New API call', { timeout: 10000 });
-  await expect(page.locator('.loop-step.done')).toHaveCount(3);
-  await expect(page.locator('.lesson-canvas circle')).toHaveAttribute('fill', '#5689f5');
-  await expect(page.locator('.lesson-canvas circle')).toHaveAttribute('data-shape-id', 'shape-1');
-
-  await advance(page);
-  await expect(page.locator('h1')).toHaveText('That’s how an agent works.');
-  const downloadPromise = page.waitForEvent('download');
-  await page.locator('#download').click();
-  expect((await downloadPromise).suggestedFilename()).toBe('agent.mjs');
-  await page.locator('#sources').click();
-  await expect(page.locator('dialog')).toBeVisible();
-  await page.keyboard.press('Escape');
-  await expect(page.locator('dialog')).not.toBeVisible();
-  await advance(page);
-  await expect(page.locator('h1')).toHaveText('From chat to action.');
+  await page.locator('#next').click();
+  await expect(page.locator('.lesson-stage.text')).toBeVisible();
   expect(errors).toEqual([]);
 });
 
-test('every slide fits a 1280 by 720 presentation viewport', async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 720 });
-  await page.goto('/');
-  for (const [index, stage] of stages.entries()) {
-    await expect(page.locator(`.lesson-stage.${stage}`)).toBeVisible();
-    await expect(page.locator('h1')).toBeInViewport({ ratio: 1 });
-    await expect(page.locator('.lesson-stage')).toBeInViewport({ ratio: 1 });
-    await expect(page.locator('#next')).toBeInViewport({ ratio: 1 });
-    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(1280);
-    if (stage === 'api') {
-      await expect(page.locator('.response-lane')).toBeVisible({ timeout: 5000 });
-      const messageSize = await page.locator('.request-lane p').evaluate(element => parseFloat(getComputedStyle(element).fontSize));
-      expect(messageSize).toBeGreaterThanOrEqual(28);
-      await page.screenshot({ path: 'test-results/presentation-api.png', fullPage: true, animations: 'disabled' });
+for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 844 }, { width: 320, height: 844 }]) {
+  test(`all nine stages fit ${viewport.width} × ${viewport.height}`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    await page.goto('/');
+    for (const stage of stages) {
+      await go(page, stage);
+      await expect(page.locator('h1')).toBeInViewport({ ratio: 1 });
+      await expect(page.locator('#next')).toBeInViewport({ ratio: 1 });
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(viewport.width);
+      const overlaps = await page.locator('.lesson-chat-label').evaluateAll(labels => labels.some(label => {
+        const sender = label.querySelector('.lesson-message-sender').getBoundingClientRect();
+        const more = label.querySelector('.lesson-more').getBoundingClientRect();
+        return sender.x < more.right && sender.right > more.x && sender.y < more.bottom && sender.bottom > more.y;
+      }));
+      expect(overlaps).toBe(false);
     }
-    if (stage === 'context') await page.screenshot({ path: 'test-results/presentation-context.png', fullPage: true, animations: 'disabled' });
-    if (index < stages.length - 1) await advance(page);
-  }
-});
+  });
+}
 
-test('mobile has no raw JSON or horizontal overflow and every step remains navigable', async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
+test('More shows highlighted teaching JSON with complete weather history', async ({ page }) => {
   await page.goto('/');
-  for (const [index, stage] of stages.entries()) {
-    await expect(page.locator(`.lesson-stage.${stage}`)).toBeVisible();
-    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
-    await expect(page.locator('pre, #show-json, .eyebrow, .optional')).toHaveCount(0);
-    expect(await page.locator('main').innerText()).not.toMatch(/"(?:messages|arguments|function|role|type)"\s*:/);
-    await expect(page.locator('#next')).toBeInViewport({ ratio: 1 });
-    if (stage === 'context') await page.screenshot({ path: 'test-results/mobile-context.png', fullPage: true, animations: 'disabled' });
-    if (index < stages.length - 1) await advance(page);
-  }
+  await page.locator('[data-details="text"]').click();
+  expect(Object.keys(JSON.parse(await page.locator('#request-detail code').innerText()))).toEqual(['текст']);
+  await expect(page.locator('#request-detail')).toContainText('не формат API');
+  await expect(page.locator('#request-detail .json-key')).not.toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await go(page, 'tool-call');
+  await page.locator('[data-details="command-call"]').click();
+  expect(JSON.parse(await page.locator('#request-detail code').innerText()).тип).toBe('вызов инструмента, не текст');
+  await page.keyboard.press('Escape');
+  await go(page, 'weather-result');
+  await page.locator('[data-details="context"]').click();
+  const context = JSON.parse(await page.locator('#request-detail code').innerText());
+  expect(context.контекст).toHaveLength(3);
+  expect(context.контекст[2].инструмент.результат_для).toBe(context.контекст[1].модель.id);
+  expect(context.контекст[0].пользователь).toBe('Нужен ли зонт в Москве?');
+  expect(context.контекст[2].инструмент.данные).toEqual(weatherToolResult);
+  await page.keyboard.press('Escape');
 });
 
-test('drawing results inform the answer and keyboard navigation cancels an active loop', async ({ page }) => {
-  await page.goto('/');
-  await advance(page, 6);
-  await page.locator('#execute-tool').click();
-  await expect(page.locator('.tool-observation')).toContainText(/shape-1 created/);
-  await advance(page, 3);
-  await expect(page.locator('.response-lane')).toBeVisible({ timeout: 5000 });
-  await expect(page.locator('.response-lane')).toContainText(/Drew a red circle/);
-
-  await advance(page);
-  await page.locator('#run-loop').click();
-  await page.keyboard.press('ArrowRight');
-  await page.waitForTimeout(1900);
-  await expect(page.locator('.lesson-stage.end')).toBeVisible();
-  await page.keyboard.press('ArrowLeft');
-  await expect(page.locator('.lesson-stage.loop')).toBeVisible();
-  await expect(page.locator('.loop-step.done')).toHaveCount(0);
-  await expect(page.locator('#run-loop')).toBeEnabled();
-});
-
-test('leaving a new request cancels its pending animation', async ({ page }) => {
+test('navigation cancels pending auto animations and Chat remains accessible', async ({ page }) => {
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.goto('/');
-  await advance(page, 8);
-  await page.locator('#send-context').click();
-  await advance(page);
-  await page.waitForTimeout(2200);
-  await expect(page.locator('.lesson-stage.answer')).toBeVisible();
+  for (const stage of ['text', 'execute', 'weather-run', 'answer']) {
+    await go(page, stage);
+    await page.locator('#next').click();
+    await page.waitForTimeout(1200);
+    await go(page, stage);
+    if (['execute', 'weather-run'].includes(stage)) await expect(page.locator('.lesson-function-panel')).toHaveClass(/is-running/);
+    else await expect(page.locator('.chat-reply')).toHaveAttribute('aria-hidden', 'true');
+  }
+  await go(page, 'define');
+  await page.keyboard.press('ArrowRight');
+  await expect(page.locator('.lesson-stage.tool-call')).toBeVisible();
   await page.keyboard.press('ArrowLeft');
-  await expect(page.locator('.lesson-stage.new-call')).toBeVisible();
-  await expect(page.locator('.context-received')).not.toBeVisible();
-  await expect(page.locator('#send-context')).toBeEnabled();
+  await expect(page.locator('.lesson-stage.define')).toBeVisible();
+  await page.locator('.lesson-draw-link').click();
+  await expect(page.locator('h1')).toHaveText('Draw');
+  await expect(page.locator('html')).toHaveAttribute('lang', 'en');
   expect(errors).toEqual([]);
 });

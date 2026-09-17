@@ -21,8 +21,9 @@ function encodeAudio(pcm) {
 }
 
 export class VoiceSession {
-  constructor({ model, executeTool, onState, onTranscript, onError, onEvent, onLevel }) {
-    Object.assign(this, { model, executeTool, onState, onTranscript, onError, onEvent, onLevel });
+  constructor({ model, reasoningEffort, enabledTools, executeTool, onState, onTranscript, onError, onEvent, onLevel }) {
+    Object.assign(this, { model, reasoningEffort, executeTool, onState, onTranscript, onError, onEvent, onLevel });
+    this.enabledTools = enabledTools ? [...enabledTools] : undefined;
     this.state = 'idle'; this.micMuted = false; this.generation = 0; this.calls = new Set(); this.toolQueue = Promise.resolve();
   }
   setState(state) { this.state = state; this.onState(state); }
@@ -57,7 +58,7 @@ export class VoiceSession {
       stream.getAudioTracks()[0].onended = () => this.fail(new Error('The microphone disconnected. Connect it and start again.'));
       const url = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/api/voice`;
       const socket = this.socket = new WebSocket(url);
-      socket.onopen = () => this.send({ type: 'session.start', model: this.model });
+      socket.onopen = () => this.send({ type: 'session.start', model: this.model, reasoningEffort: this.reasoningEffort, enabledTools: this.enabledTools });
       socket.onmessage = message => { if (generation === this.generation) this.receive(JSON.parse(message.data), generation); };
       socket.onerror = () => { if (generation === this.generation) this.fail(new Error('The voice connection failed. Try again.')); };
       socket.onclose = () => {
@@ -109,7 +110,9 @@ export class VoiceSession {
       this.calls.add(call.call_id);
       this.toolQueue = this.toolQueue.then(async () => {
         if (generation !== this.generation || this.state !== 'listening') return;
-        const result = call.name === 'end_conversation' ? { output: '{"ended":true}' } : await this.executeTool(call);
+        const result = this.enabledTools && !this.enabledTools.includes(call.name)
+          ? { output: JSON.stringify({ error: 'This tool is disabled.' }), failed: true }
+          : call.name === 'end_conversation' ? { output: '{"ended":true}' } : await this.executeTool(call);
         if (generation === this.generation && this.state === 'listening' && result) this.send({ type: 'tool.result', call_id: call.call_id, ...result });
       }).catch(error => this.fail(error));
     }

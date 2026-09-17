@@ -6,7 +6,7 @@ const number = { type: 'number' };
 const nullableNumber = { type: ['number', 'null'] };
 export const drawingTools = [
   { type: 'function', name: 'read_canvas', description: 'Inspect the entire canvas as an image, with every shape ID and attribute. Check composition, spacing, overlap and colors. Use before drawing and after changes to verify the result.', strict: true, parameters: schema({}) },
-  { type: 'function', name: 'read_svg', description: 'Read the current SVG drawing, shape IDs, and attributes. Read before editing an existing shape.', strict: true, parameters: schema({}) },
+  { type: 'function', name: 'read_svg', description: 'Read the current drawing source (artwork.svg or artwork.code), plus basic shape IDs and attributes. Read before editing. Complete scenes are revised with draw_svg or draw_js; basic shapes with update_svg.', strict: true, parameters: schema({}) },
   { type: 'function', name: 'create_svg', description: 'Add one circle, rectangle, or ellipse. Coordinates are on a 640 by 640 canvas. x/y are the center; width/height are the full size. A circle must have equal width and height. Returns a stable ID.', strict: true, parameters: schema({ shape: { type: 'string', enum: ['circle', 'rectangle', 'ellipse'] }, fill: { type: 'string', description: 'A color name or six-digit hex color.' }, x: number, y: number, width: number, height: number }) },
   { type: 'function', name: 'update_svg', description: 'Update an existing shape by its ID. Null fields remain unchanged. Preserve the shape ID. For a circle, provide equal width and height when resizing.', strict: true, parameters: schema({ id: { type: 'string' }, fill: { type: ['string', 'null'] }, x: nullableNumber, y: nullableNumber, width: nullableNumber, height: nullableNumber }) },
 ];
@@ -30,11 +30,16 @@ function validate(shape) {
 }
 
 export function createDrawingStore() {
-  let shapes = [], sequence = 0, version = 0;
-  const read = () => ({ width: CANVAS_SIZE, height: CANVAS_SIZE, version, shapes: structuredClone(shapes) });
+  let shapes = [], sequence = 0, version = 0, artwork = null;
+  const read = () => ({ width: CANVAS_SIZE, height: CANVAS_SIZE, version, shapes: structuredClone(shapes), ...(artwork ? { artwork: structuredClone(artwork) } : {}) });
   return {
     read,
-    reset() { shapes = []; sequence = 0; version = 0; },
+    reset() { shapes = []; sequence = 0; version = 0; artwork = null; },
+    // Only the browser renderer supplies artwork; model arguments never call this directly.
+    replaceArtwork(value) {
+      artwork = structuredClone(value); shapes = []; version++;
+      return { action: 'drawn', format: artwork.type, version, width: CANVAS_SIZE, height: CANVAS_SIZE };
+    },
     execute(name, args) {
       if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error('Tool arguments must be an object.');
       const definition = drawingTools.find(tool => tool.name === name);
@@ -66,5 +71,6 @@ export function shapeMarkup(shape) {
 }
 
 export function exportDrawing(snapshot) {
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${CANVAS_SIZE} ${CANVAS_SIZE}" width="${CANVAS_SIZE}" height="${CANVAS_SIZE}">${snapshot.shapes.map(shapeMarkup).join('')}</svg>`;
+  const artwork = snapshot.artwork ? `<image width="640" height="640" href="${snapshot.artwork.imageUrl}" />` : '';
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${CANVAS_SIZE} ${CANVAS_SIZE}" width="${CANVAS_SIZE}" height="${CANVAS_SIZE}">${artwork}${snapshot.shapes.map(shapeMarkup).join('')}</svg>`;
 }

@@ -1,10 +1,8 @@
 import { mountDrawer } from './drawer.js';
-import { bindThemeControls } from './site-theme.js';
 import { settingsButton, mountSettings } from './settings.js';
-import example from '../examples/agent.mjs?raw';
-import drawingToolsSource from './drawing-tools.js?raw';
 import { lessonExample, createLessonFlow } from './lesson.js';
-import { shapeMarkup, COLORS } from './drawing-tools.js';
+import { shapeMarkup } from './drawing-tools.js';
+import { highlightJson } from './drawing-log.js';
 
 const lessonFlow = createLessonFlow();
 
@@ -19,58 +17,94 @@ const paths = {
 };
 const icon = name => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name]}</svg>`;
 const slides = [
-  ['From chat to action.', 'Understand AI agents, one step at a time.', 'intro'],
-  ['It starts with language.', 'A model takes words in and generates words out.', 'text'],
-  ['A few ideas came together.', '', 'history'],
-  ['An API connects your code.', 'Send a message. Get a response.', 'api'],
-  ['First, offer a tool.', 'Now ask the model to change the canvas.', 'define'],
-  ['This response is a tool call.', 'A special format: a function name and arguments. No text answer yet.', 'tool-call'],
-  ['Your code runs the function.', 'This part happens in your application, outside the model.', 'execute'],
-  ['Your code keeps the context.', 'Save the question, the model’s tool call, and the tool result.', 'context'],
-  ['A completely new API call.', 'No memory between calls. Send the context again.', 'new-call'],
-  ['Now the response is text.', 'Call 2 answers using the context you just sent.', 'answer'],
-  ['Now, change your mind.', '“Make it blue.” Same circle. Another tool call.', 'loop'],
-  ['That’s how an agent works.', 'A model chooses. Your code acts. Context connects the calls.', 'end'],
+  ['Обычный ответ.', 'Модель получает текст и возвращает текст.', 'text'],
+  ['Дадим модели инструмент.', 'В запросе есть сообщение и описание доступной функции.', 'define'],
+  ['Модель возвращает вызов.', 'Это не текст: имя инструмента и параметры.', 'tool-call'],
+  ['Функцию выполняет ваш код.', 'Круг нарисован — задача решена. Второй вызов модели не нужен.', 'execute'],
+  ['Теперь нужны данные.', 'Другой инструмент возвращает погоду для ответа.', 'weather'],
+  ['Модель запрашивает погоду.', 'Снова вызов инструмента. Ответа пользователю ещё нет.', 'weather-call'],
+  ['Сервис возвращает JSON.', 'Данные на английском. Это ещё не ответ пользователю.', 'weather-run'],
+  ['Обратно к ИИ.', 'Новый запрос: вопрос + вызов + JSON. Памяти между вызовами нет.', 'weather-result'],
+  ['Теперь — понятный ответ.', 'Модель выбирает нужное из JSON и отвечает на языке вопроса.', 'answer'],
 ];
-const history = [
-  ['2017', 'Transformers', 'A new architecture became the foundation for modern language models.', 'https://arxiv.org/abs/1706.03762'],
-  ['2020', 'The API', 'Developers could connect their software to GPT-3-family models.', 'https://openai.com/index/openai-api/'],
-  ['2022', 'Reason + act', 'ReAct explored using actions and their results to guide a model’s next step.', 'https://arxiv.org/abs/2210.03629'],
-  ['2023', 'Function calling', 'OpenAI made structured tool requests a feature of its API.', 'https://openai.com/index/function-calling-and-other-api-updates/'],
-];
-let step = 0, year = 0, phase = 0, running = false, generation = 0, exchangeRun = 0;
-let executed = false, executing = false, contextSent = false, contextSending = false;
+let step = 0, generation = 0;
+let executed = false;
 const $ = selector => document.querySelector(selector);
 const stage = () => slides[step][2];
-const canvasPreview = (visible = true, blue = false) => `<svg class="lesson-canvas" viewBox="0 0 640 640" role="img" aria-label="${visible ? blue ? 'Blue circle' : 'Red circle' : 'Empty canvas'}">${visible ? shapeMarkup({ ...lessonFlow.result.shape, fill: blue ? COLORS.blue : COLORS.red }) : ''}</svg>`;
-const orb = (className = '') => `<div class="model-orb ${className}" role="img" aria-label="Language model"><div class="model-orb-core"></div></div>`;
-const node = (symbol, label) => `<div class="diagram-node"><div class="diagram-node-icon">${icon(symbol)}</div><span>${label}</span></div>`;
-const modelNode = label => `<div class="diagram-node">${orb()}<span>${label}</span></div>`;
-const track = () => `<div class="message-track" aria-hidden="true"><i></i>${icon('arrow')}</div>`;
-const toolCall = () => `<div class="tool-call-card"><span class="type-label tool-color">Tool call · #1</span><strong>create_svg</strong><div class="argument"><span>Shape</span><b>Circle</b></div><div class="argument"><span>Fill</span><b>Red</b></div></div>`;
-const contextRows = () => `<div class="context-rows"><div class="context-row setup-row"><span>Instructions + tools</span><strong>Draw on the canvas · SVG tools</strong></div><div class="context-row"><span>User</span><strong>“${lessonExample.drawRequest}”</strong></div><div class="context-row tool-row"><span>Model · tool call #1</span><strong>create_svg · red circle</strong></div><div class="context-row result-row"><span>Tool result · #1</span><strong>${lessonFlow.result.shape.id} created</strong></div></div>`;
-const replay = () => `<button id="replay-exchange" class="text-button">${icon('replay')} Replay</button><span class="sr-only" id="exchange-status" role="status"></span>`;
+const canvasPreview = (visible = true) => `<svg class="lesson-canvas" viewBox="0 0 640 640" role="img" aria-label="${visible ? 'Красный круг' : 'Пустой холст'}">${visible ? shapeMarkup(lessonFlow.command.shape) : ''}</svg>`;
+const avatars = {
+  user: { name: 'Вы', path: '<circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/>' },
+  ai: { name: 'ИИ', path: '<rect x="4" y="6" width="16" height="14" rx="4"/><path d="M12 3v3M2 11v5m20-5v5M9 16h6"/><path d="M8 11h1m6 0h1"/>' },
+  code: { name: 'Ваш код', path: paths.code },
+  tool: { name: 'Инструмент', path: '<path d="m14 6 4 4-8 8-4-4 8-8ZM4 20l2-6m4 4-6 2M14 6V3h7v7h-3"/>' },
+};
+const avatar = role => `<span class="lesson-avatar avatar-${role}" role="img" aria-label="${avatars[role].name}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${avatars[role].path}</svg></span>`;
+const details = {
+  text: { текст: lessonExample.textRequest },
+  'text-answer': { ответ: lessonExample.textResponse },
+  command: { текст: lessonExample.drawRequest, инструменты: [{ имя: 'draw_circle', описание: 'Рисует круг. Не возвращает данные.' }] },
+  'command-call': { тип: 'вызов инструмента, не текст', вызвать: 'draw_circle', параметры: { цвет: 'красный' } },
+  weather: { текст: lessonExample.weatherRequest, инструменты: [{ имя: 'get_weather', описание: 'Возвращает погоду в указанном городе.' }] },
+  'weather-call': { тип: 'вызов инструмента, не текст', вызвать: 'get_weather', параметры: { город: 'Москва' } },
+  'weather-result': { от_инструмента: 'get_weather', данные: lessonFlow.result, источник: 'Учебный пример, не текущий прогноз' },
+  context: {
+    новый_API_запрос: true,
+    инструкции: 'Ответь на исходный вопрос по данным погоды. Используй язык пользователя.',
+    инструменты: [{ имя: 'get_weather', описание: 'Возвращает погоду в указанном городе.' }],
+    контекст: [
+      { пользователь: lessonExample.weatherRequest },
+      { модель: { вызов: 'get_weather', город: 'Москва', id: 'weather_1' } },
+      { инструмент: { результат_для: 'weather_1', данные: lessonFlow.result } },
+    ],
+  },
+  answer: { ответ: lessonExample.weatherResponse },
+};
+const more = key => `<button type="button" class="lesson-more" data-details="${key}" aria-haspopup="dialog">Подробнее ${icon('code')}</button>`;
+const message = (label, content, key, kind = '') => {
+  const role = ['text', 'command', 'weather'].includes(key) ? 'user' : ['text-answer', 'command-call', 'weather-call', 'answer'].includes(key) ? 'ai' : key === 'weather-result' ? 'tool' : 'code';
+  return `<article class="lesson-chat-message ${kind}" data-speaker="${role}"><div class="lesson-chat-label"><div class="lesson-message-sender">${avatar(role)}<span><strong>${avatars[role].name}</strong><span class="lesson-message-type">${label}</span></span></div>${key ? more(key) : ''}</div>${content}</article>`;
+};
+const toolList = weather => `<div class="lesson-available-tool"><code>${weather ? 'get_weather' : 'draw_circle'}</code><span>${weather ? 'Возвращает погоду в городе' : 'Рисует круг без возврата данных'}</span></div>`;
+const requestMessage = (weather = false) => message('Запрос · текст + инструмент', `<p>${weather ? lessonExample.weatherRequest : lessonExample.drawRequest}</p>${toolList(weather)}`, weather ? 'weather' : 'command');
+const callMessage = weather => message('Ответ · вызов инструмента', `<p><code>${weather ? 'get_weather' : 'draw_circle'}</code><span class="lesson-call-argument">${weather ? 'город: Москва' : 'цвет: красный'}</span></p>`, weather ? 'weather-call' : 'command-call', 'tool-message');
+const weatherJson = () => {
+  const entries = Object.entries(lessonFlow.result);
+  const lines = [];
+  for (let i = 0; i < entries.length; i += 2) lines.push('  ' + highlightJson(Object.fromEntries(entries.slice(i, i + 2)), 0).slice(1, -1));
+  return `<pre class="lesson-weather-json" aria-label="Данные сервиса погоды на английском"><code>{\n${lines.join(',\n')}\n}</code></pre>`;
+};
+const returnRequest = () => message('API-запрос 2 → ИИ', `<p class="lesson-original-question">${lessonExample.weatherRequest}</p><div class="lesson-carried-call"><span>Предыдущий вызов ИИ</span><strong>get_weather · Москва</strong></div><div class="lesson-return-data"><span>Результат инструмента</span>${weatherJson()}</div>`, 'context', 'return-request');
+const chat = content => `<div class="lesson-chat">${content}</div>`;
+const executionPanel = weather => `<section class="lesson-function-panel ${executed ? 'is-complete' : 'is-running'}" aria-label="Действие в приложении"><div class="lesson-function-header"><span>${icon('code')}Ваше приложение</span><span role="status">${executed ? 'Выполнено' : 'Выполняется…'}</span></div><div class="lesson-function-body"><span class="lesson-function-name">${weather ? 'get_weather' : 'draw_circle'}</span><div class="lesson-function-output" aria-live="polite">${weather ? executed ? `${weatherJson()}<span class="lesson-fixture">Учебные данные</span>` : '<span class="lesson-function-placeholder">Получаем погоду…</span>' : `<div class="lesson-drawn-result">${canvasPreview(executed)}<p>${executed ? 'Круг нарисован.' : 'Рисуем круг…'}</p></div>`}</div></div></section>`;
 
 function scene() {
   switch (stage()) {
-    case 'intro': return `<div class="hero-orb">${orb('large')}</div>`;
-    case 'text': return `<div class="lesson-conversation"><div class="lesson-message user">${lessonExample.textRequest}</div>${orb('small')}<div class="lesson-message response">${lessonExample.textResponse}</div></div>`;
-    case 'history': return `<div class="history-timeline"><div class="years" role="tablist" aria-label="Milestones">${history.map((h, i) => `<button role="tab" aria-selected="${year === i}" data-year="${i}" class="${year === i ? 'selected' : ''}">${h[0]}</button>`).join('')}</div><div class="history-detail" role="tabpanel"><h2>${history[year][1]}</h2><p>${history[year][2]}</p></div></div>`;
-    case 'api': return `<div class="api-demo"><div class="round-trip">${node('code', 'Your code')}<div class="message-lanes"><div class="message-lane request-lane"><span class="message-label">Request</span><p>“${lessonExample.textRequest}”</p>${track()}</div><div class="message-lane response-lane" aria-hidden="true"><span class="message-label">Response · Text</span><p>“${lessonExample.textResponse}”</p>${track()}</div></div>${modelNode('Model')}</div>${replay()}</div>`;
-    case 'define': return `<div class="single-exchange forward"><div class="round-trip">${node('code', 'Your code')}<div class="message-lane request-lane"><span class="message-label">API call 1 · Request</span><p>“${lessonExample.drawRequest}”</p><div class="offered-tool"><span>Available tool</span><strong>create_svg</strong></div>${track()}</div>${modelNode('Model')}</div></div>`;
-    case 'tool-call': return `<div class="single-exchange returning tool-exchange"><div class="round-trip">${node('code', 'Your code')}<div class="message-lane"><span class="message-label">API call 1 · Response</span>${toolCall()}${track()}</div>${modelNode('Model')}</div></div>`;
-    case 'execute': return `<div class="execution-demo"><div class="round-trip execution-trip ${executing ? 'executing' : ''} ${executed ? 'executed' : ''}">${node('code', 'Your code')}<div class="execution-messages"><div class="message-lane"><span class="message-label tool-color">Run the requested function</span><p class="function-text">create_svg · red circle</p>${track()}</div><div class="tool-observation ${executed ? 'visible' : ''}" ${executed ? '' : 'aria-hidden="true"'}><span class="message-label result-color">Tool result · #1</span><p>${lessonFlow.result.shape.id} created</p>${track()}</div></div><div class="diagram-node">${canvasPreview(executed)}<span>Your canvas</span></div></div><button id="execute-tool" class="secondary" ${executing ? 'disabled' : ''}>${icon(executed ? 'replay' : 'play')}${executing ? 'Running…' : executed ? 'Run again' : 'Run tool'}</button></div>`;
-    case 'context': return `<div class="context-demo">${contextRows()}</div>`;
-    case 'new-call': return `<div class="new-call-demo ${contextSent ? 'sent' : ''} ${contextSending ? 'sending-context' : ''}"><div class="context-delivery"><div class="request-bundle"><span class="bundle-title">API call 2 · New request</span>${contextRows()}</div><div class="context-connector" aria-hidden="true">${track()}</div>${modelNode('Same model')}</div><div class="context-received ${contextSent ? 'visible' : ''}" role="status">${contextSent ? 'Context delivered to call 2.' : ''}</div><button id="send-context" class="secondary" ${contextSending ? 'disabled' : ''}>${icon(contextSent ? 'replay' : 'arrow')}${contextSending ? 'Sending…' : contextSent ? 'Send again' : 'Send new request'}</button></div>`;
-    case 'answer': return `<div class="api-demo answer-demo"><div class="round-trip">${node('code', 'Your code')}<div class="message-lanes"><div class="message-lane request-lane"><span class="message-label">API call 2 · Request</span><p>Earlier context +<br>shape-1 created</p>${track()}</div><div class="message-lane response-lane" aria-hidden="true"><span class="message-label">Response · Text</span><p>“${lessonExample.drawResponse}”</p>${track()}</div></div>${modelNode('Model')}</div>${replay()}</div>`;
-    case 'loop': return `<div class="loop-demo"><div class="loop-steps">${[['code', 'Model requests', 'update_svg'], ['code', 'Your code edits', 'Same shape-1'], ['replay', 'New API call', 'Context + result']].map((v, i) => `<div class="loop-step ${phase > i ? 'done' : ''} ${running && phase === i ? 'working' : ''}"><div>${i === 1 ? canvasPreview(true, phase >= 2) : icon(phase > i ? 'check' : v[0])}</div><span>${v[1]}</span><b>${v[2]}</b></div>${i < 2 ? `<div class="loop-line ${phase > i ? 'done' : ''}"></div>` : ''}`).join('')}</div><div class="loop-output" aria-live="polite">${phase === 0 ? 'Request: earlier context + “Make it blue.”' : phase === 1 ? '<span class="tool-color">Tool call: update_svg · shape-1 · blue</span>' : phase === 2 ? '<span class="result-color">Tool result: shape-1 updated.</span>' : 'New API call → Text: “Made it blue.”'}</div><button id="run-loop" class="secondary" ${running ? 'disabled' : ''}>${icon(phase === 3 ? 'replay' : 'play')}${running ? 'Running…' : phase === 3 ? 'Replay' : 'Make it blue'}</button></div>`;
-    case 'end': return `<div class="ending"><div class="formula"><span>Model</span><b>+</b><span>Tools</span><b>+</b><span>Context</span></div><div class="end-actions"><button id="download" class="secondary">${icon('download')} Get the code</button><button id="sources" class="text-button">Sources</button></div></div>`;
+    case 'text': return chat(`${message('Запрос', `<p>${lessonExample.textRequest}</p>`, 'text')}${message('Ответ · текст', `<p>${lessonExample.textResponse}</p>`, 'text-answer', 'text-message chat-reply')}`);
+    case 'define':
+    case 'weather': return chat(requestMessage(stage() === 'weather'));
+    case 'tool-call':
+    case 'weather-call': {
+      const weather = stage() === 'weather-call';
+      return chat(`${requestMessage(weather)}${callMessage(weather)}`);
+    }
+    case 'execute':
+    case 'weather-run': return executionPanel(stage() === 'weather-run');
+    case 'weather-result': return chat(returnRequest());
+    case 'answer': return chat(`${message('API-запрос 2 · с контекстом', `<p>${lessonExample.weatherRequest}</p><div class="lesson-available-tool"><span>+ вызов get_weather и его JSON</span></div>`, 'context')}${message('Ответ · текст', `<p>${lessonExample.weatherResponse}</p>`, 'answer', 'text-message chat-reply')}`);
   }
 }
 
 function render() {
+  document.documentElement.lang = 'ru';
   const [title, description, type] = slides[step];
-  $('#app').innerHTML = `<div class="reading-progress" role="progressbar" aria-label="Lesson progress" aria-valuemin="0" aria-valuemax="${slides.length - 1}" aria-valuenow="${step}"><div style="transform:scaleX(${step / (slides.length - 1)})"></div></div><header class="lesson-header"><a href="#" id="home" class="brand" aria-label="Agent lab — restart lesson"><span class="brand-mark"></span>agent lab</a><a href="#draw" class="lesson-draw-link">Draw ↗</a><button class="theme-reset-button" type="button" data-reset-theme>Reset theme</button></header><main><div class="lesson-copy"><h1 tabindex="-1">${title}</h1>${description ? `<p>${description}</p>` : ''}</div><section class="lesson-stage ${type}" aria-label="Interactive lesson">${scene()}</section><footer><button id="back" class="lesson-back" aria-label="Previous step" ${step === 0 ? 'disabled' : ''}>${icon('arrow')}</button><nav class="lesson-pagination" aria-label="Lesson pages">${slides.map((slide, index) => `<button data-page="${index}" aria-label="Page ${index + 1}: ${slide[0]}" ${index === step ? 'aria-current="page"' : ''}>${index + 1}</button>`).join('')}</nav><button id="next" class="lesson-next">${step === 0 ? 'Begin' : step === slides.length - 1 ? 'Again' : 'Next'}${icon(step === slides.length - 1 ? 'replay' : 'arrow')}</button></footer></main><dialog id="detail" aria-labelledby="detail-title"><button id="close" aria-label="Close sources">${icon('close')}</button><h2 id="detail-title">Where it began.</h2><p>The lesson is a scripted SVG demonstration and shows your application sending conversation history explicitly. APIs can also store history for you; that history still becomes context for the next model call.</p><p>Message cards are simplified. Real requests preserve every model output item, instructions, and tool definitions. Tool results match calls by their call ID.</p><div class="sources">${history.map(h => `<a href="${h[3]}" target="_blank" rel="noreferrer">${h[0]} · ${h[1]} ↗</a>`).join('')}<a href="https://developers.openai.com/api/docs/guides/function-calling" target="_blank" rel="noreferrer">Function calling documentation ↗</a><a href="https://developers.openai.com/api/docs/guides/conversation-state" target="_blank" rel="noreferrer">Conversation state and stateless calls ↗</a></div></dialog>`;
+  $('#app').innerHTML = `<div class="reading-progress" role="progressbar" aria-label="Прогресс урока" aria-valuemin="0" aria-valuemax="${slides.length - 1}" aria-valuenow="${step}"><div style="transform:scaleX(${step / (slides.length - 1)})"></div></div><header class="lesson-header"><a href="#" id="home" class="brand" aria-label="Agent lab — начать урок заново"><span class="brand-mark"></span>agent lab</a><a href="#draw" class="lesson-draw-link">Рисовать ↗</a></header><main><div class="lesson-copy"><h1 tabindex="-1">${title}</h1><p>${description}</p></div><section class="lesson-stage ${type}" aria-label="Интерактивный урок">${scene()}</section><footer><button id="back" class="lesson-back" aria-label="Предыдущий шаг" ${step === 0 ? 'disabled' : ''}>${icon('arrow')}</button><nav class="lesson-pagination" aria-label="Страницы урока">${slides.map((slide, index) => `<button data-page="${index}" aria-label="Страница ${index + 1}: ${slide[0]}" ${index === step ? 'aria-current="page"' : ''}>${index + 1}</button>`).join('')}</nav><button id="next" class="lesson-next">${step === slides.length - 1 ? 'Сначала' : 'Далее'}${icon(step === slides.length - 1 ? 'replay' : 'arrow')}</button></footer></main><dialog id="request-detail" class="lesson-json-dialog" aria-labelledby="request-detail-title"><div class="settings-heading"><h2 id="request-detail-title">Учебный JSON</h2><button type="button" class="settings-close" aria-label="Закрыть JSON">×</button></div><p>Упрощённая схема для объяснения, не формат API.</p><pre tabindex="0" aria-label="JSON для объяснения"><code></code></pre></dialog>`;
+  const jsonDialog = $('#request-detail');
+  jsonDialog.querySelector('button').onclick = () => jsonDialog.close();
+  jsonDialog.onclick = event => {
+    if (event.target !== jsonDialog) return;
+    const rect = jsonDialog.getBoundingClientRect();
+    if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) jsonDialog.close();
+  };
   $('#next').onclick = () => navigate(step === slides.length - 1 ? 0 : step + 1);
   $('#back').onclick = () => navigate(step - 1);
   document.querySelectorAll('[data-page]').forEach(button => {
@@ -80,82 +114,45 @@ function render() {
   const selectedPage = pagination.querySelector('[aria-current]');
   pagination.scrollLeft = selectedPage.offsetLeft - (pagination.clientWidth - selectedPage.offsetWidth) / 2;
   $('#home').onclick = e => { e.preventDefault(); navigate(0); };
-  $('#close').onclick = () => $('#detail').close();
-  $('#detail').onclick = e => { if (e.target === $('#detail')) $('#detail').close(); };
   bindScene();
-  bindThemeControls();
   $('.lesson-header').insertAdjacentHTML('beforeend', settingsButton);
-  mountSettings($('#app'));
+  mountSettings($('#app'), { language: 'ru' });
 }
 
 function navigate(n) {
   if (['#draw', '#voice'].includes(location.hash)) return;
   generation++;
-  running = false; executing = false; contextSending = false;
-  phase = 0; executed = false; contextSent = false;
+  executed = false;
   step = Math.max(0, Math.min(slides.length - 1, n));
   render();
   $('h1').focus({ preventScroll: true });
 }
-function refreshScene(focusSelector) {
-  $('.lesson-stage').innerHTML = scene(); bindScene();
-  if (focusSelector) $(focusSelector)?.focus({ preventScroll: true });
-}
+
 function bindScene() {
-  if ($('#replay-exchange')) { $('#replay-exchange').onclick = playExchange; playExchange(); }
-  document.querySelectorAll('[data-year]').forEach(b => {
-    b.onclick = () => { year = +b.dataset.year; refreshScene(`[data-year="${year}"]`); };
-    b.onkeydown = e => {
-      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
-      e.preventDefault(); e.stopPropagation();
-      year = (+b.dataset.year + (e.key === 'ArrowRight' ? 1 : 3)) % 4;
-      refreshScene(`[data-year="${year}"]`);
+  document.querySelectorAll('[data-details]').forEach(button => {
+    button.onclick = () => {
+      $('#request-detail code').innerHTML = highlightJson(details[button.dataset.details]);
+      $('#request-detail').showModal();
     };
   });
-  if ($('#execute-tool')) $('#execute-tool').onclick = executeTool;
-  if ($('#send-context')) $('#send-context').onclick = sendContext;
-  if ($('#run-loop')) $('#run-loop').onclick = run;
-  if ($('#download')) $('#download').onclick = () => {
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([example.replace("import { createDrawingStore, drawingTools, exportDrawing } from '../src/drawing-tools.js';", () => drawingToolsSource)], { type: 'text/javascript' }));
-    a.download = 'agent.mjs'; a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-  };
-  if ($('#sources')) $('#sources').onclick = () => $('#detail').showModal();
-}
-function playExchange() {
-  const id = ++exchangeRun, navigation = generation, demo = $('.api-demo');
-  demo.classList.remove('responding', 'sending');
-  $('.response-lane').setAttribute('aria-hidden', 'true');
-  $('#exchange-status').textContent = stage() === 'api' ? `Your code sends the request: ${lessonExample.textRequest}` : 'Your code sends a new API request with the earlier context and the tool result.';
-  void demo.offsetWidth; demo.classList.add('sending');
-  setTimeout(() => {
-    if (id !== exchangeRun || navigation !== generation || !['api', 'answer'].includes(stage())) return;
-    demo.classList.add('responding'); $('.response-lane').setAttribute('aria-hidden', 'false');
-    $('#exchange-status').textContent = stage() === 'api' ? `The model returns text: ${lessonExample.textResponse}` : `The model returns text: ${lessonExample.drawResponse}`;
-  }, 2400);
-}
-async function executeTool() {
-  if (executing) return;
-  const id = ++generation; executing = true; executed = false; refreshScene();
-  await new Promise(resolve => setTimeout(resolve, 1500));
-  if (id !== generation) return;
-  executing = false; executed = true; refreshScene('#execute-tool');
-}
-async function sendContext() {
-  if (contextSending) return;
-  const id = ++generation; contextSending = true; contextSent = false; refreshScene();
-  await new Promise(resolve => setTimeout(resolve, 1800));
-  if (id !== generation) return;
-  contextSending = false; contextSent = true; refreshScene('#send-context');
-}
-async function run() {
-  if (running) return;
-  const id = ++generation; phase = 0; running = true; refreshScene();
-  for (let i = 1; i <= 3; i++) {
-    await new Promise(resolve => setTimeout(resolve, 1700));
-    if (id !== generation) return;
-    phase = i; if (i === 3) running = false; refreshScene();
+  const navigation = generation;
+  const reply = $('.chat-reply');
+  if (reply) {
+    reply.setAttribute('aria-hidden', 'true');
+    reply.inert = true;
+    setTimeout(() => {
+      if (navigation !== generation || !reply.isConnected) return;
+      reply.classList.add('is-visible');
+      reply.setAttribute('aria-hidden', 'false');
+      reply.inert = false;
+    }, 850);
+  }
+  if (['execute', 'weather-run'].includes(stage()) && !executed) {
+    setTimeout(() => {
+      if (navigation !== generation || !$('.lesson-function-panel')) return;
+      executed = true;
+      $('.lesson-stage').innerHTML = scene();
+    }, 1000);
   }
 }
 document.addEventListener('keydown', e => {
@@ -181,6 +178,7 @@ function route() {
   generation++;
   unmountDrawer?.();
   unmountDrawer = null;
+  document.documentElement.lang = ['#draw', '#voice'].includes(location.hash) ? 'en' : 'ru';
   if (['#draw', '#voice'].includes(location.hash)) unmountDrawer = mountDrawer($('#app'), { voice: location.hash === '#voice' });
   else render();
 }

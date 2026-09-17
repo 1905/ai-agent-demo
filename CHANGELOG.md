@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+- Removed internal workspace references from voice implementation comments and documentation.
+
+- Added Tool settings beside the Tool calls heading in Chat and Voice: individual switches, All on/off, and shared saved preferences. Includes the Voice-only stop tool.
+- Chat freezes the enabled tool list for each turn; Voice applies it on connection. All off sends zero tools, with text-only instructions. Disabled calls are rejected before execution. Simple logs explicitly show no tools.
+- Build and 39 Node tests pass, including provider payloads, invalid selections, empty tool lists, and blocked disabled Voice calls. Managed browser checks passed at 1280, 390, and 320px for switches, keyboard controls, saved settings, no-tool Chat, selected-tool drawing, turn/session consistency, and Voice reconnect behavior. Provider and microphone activity were simulated.
+
+- Added `draw_js` for complete Canvas 2D scenes and `draw_svg` for full SVG documents in Chat and Voice. Full SVG supports paths, text, gradients, groups, filters, and arbitrary SVG colors and geometry.
+- Saved scene source is available through `read_svg`; `read_canvas` checks the complete result. Drawings survive mode changes. JavaScript exports PNG; SVG exports SVG. Errors leave the previous drawing intact.
+- JavaScript runs in an isolated worker with a two-second execution limit and blocked network access. SVG stays in image context. Browser checks passed for dev and built renderers, exports, source/image reads, Voice sharing, blocked network/DOM access, errors, timeouts, cancellation, and reset. Model responses were simulated; no live provider or microphone checks.
+- Simplified the API log further: message text, tool names, and short result labels only. Code, arguments, IDs, model settings, images, and request metadata remain in raw tabs. Long context shows six recent messages and an earlier-message count.
+- Build and 33 Node tests pass. Simple/raw views, Copy, full trace preservation, and wrapped desktop/mobile layouts passed managed browser checks with simulated responses. Four new artwork browser tests were added and syntax-checked; equivalent checks ran through the managed CLI, not the Playwright Test runner.
+
+- Focused the Russian presentation on nine progressive tool-calling steps: text, drawing command, local action, weather request, returned data, full context, and a fresh model call.
+- Weather now returns detailed English JSON. The next slide sends the exact data, original Russian question, and earlier tool call back to the LLM. Only then does the model give a useful Russian answer.
+- Replaced floating spheres with avatars attached to user/AI/tool messages. Function execution is a separate application panel, not a chat message.
+- Removed history, sources, downloads, replay, and execution buttons from the presentation. Next drives the lesson; animations run automatically. Optional “Подробнее” shows highlighted teaching JSON.
+- Added a default Simple tab to API logs. It summarizes messages, tool calls, and results; original Request/Response JSON and Copy remain available.
+- Added Luna and Sol alongside Terra and Astra. Chat and Voice share a saved reasoning-effort setting, defaulting to Medium; active turns/sessions keep their starting settings.
+- Build and 28 automated tests pass. All nine steps passed browser checks at 1280×720, 390×844, and 320×844, including the exact weather JSON carried into the next request. Narrow-screen overlap and navigation overflow are fixed. Earlier avatar, automatic execution, navigation cancellation, Simple/raw log, Copy, settings persistence, and simulated Voice checks passed without paid calls. Live provider and microphone checks were not repeated.
+
 - Added a microphone on/off toggle next to Settings, visible only while Voice is connected. Muting disables microphone tracks and sends silence; the connection, agent playback, and drawing tools stay active.
 - Build and 23 tests pass. Synthetic audio and browser checks verified mute/unmute, continued playback/tools, keyboard control, connection visibility, and desktop/mobile layout. Live provider and physical microphone checks were not repeated.
 
