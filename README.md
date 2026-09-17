@@ -1,113 +1,139 @@
 # Agent Lab
 
-An interactive first lesson on LLM APIs and function calls. A Russian opening slide introduces the three topics: request and response, tool calls, and results with context. Four animated history slides follow: original text-only ChatGPT, then a return to earlier research with WebGPT, Toolformer, and API function calling. Dates and scope are documented in [history sources](docs/tool-calling-history.md). Nine practical lesson slides then introduce tools: first a command that draws a circle without returning data, then a weather tool that returns detailed English JSON. The application sends that data, the original Russian question, and the prior tool call back to the model. The model then gives a short Russian answer. Chat and Voice remain in English.
+An interactive lesson and live playground for learning how LLM tool calls work. The presentation is in Russian. The lab interface is in English; Voice responds in the language you speak.
 
-## Local development
+The lesson shows the full loop: send a request, receive a structured tool call, execute it, and send the result back with context. Chat and Voice let you try that loop with drawings, animations, and live theme changes.
 
-Requires Node.js 20.19+ (or 22.12+).
+## Run locally
+
+Requires Node.js 20.19+ or 22.12+.
 
 ```sh
-npm install
 make dev
 ```
 
-Open http://localhost:5180. Use `make dev PORT=5190` for another port. The opening slide has only Start. After Start, use numbered pages, navigation buttons, arrow keys, or horizontal swipes. The final slide opens the lab. The lesson has no app header; the logo, model label, Chat/Voice tabs, and settings appear in the lab. The dark lesson uses large chat messages for screen sharing. “Подробнее” opens highlighted teaching JSON: message text, tool names, and short descriptions. It is explicitly an explanatory format, not an API payload. Drawing and weather are scripted examples; the weather card labels its fixed data. Next drives the lesson; reply and action illustrations animate automatically. Function execution uses a separate application panel, followed by a tool-result chat message when data is returned. History, sources, code downloads, and execution controls are absent from the presentation. Chat and Voice use the configured API. The header shows the current thinking model.
+This installs dependencies when needed and starts the app at **http://localhost:5180**. Use `make dev PORT=5190` for another port.
 
-## Build and verify
+The presentation works without an API key. For live Chat and Voice, create `.env` from [.env.example](.env.example) if one does not already exist, then set `OPENAI_API_KEY`. Restart the server after changing environment settings.
+
+The project `.env` overrides inherited shell settings. The key stays on the server. Real model calls use provider credits; missing credentials or provider errors are shown in the app.
+
+## Presentation
+
+Fourteen pages progress from the opening title to the lab:
+
+1. **Start:** request/response, tool calls, and context.
+2. **Four history slides:** original text-only ChatGPT, a return to earlier WebGPT research, Toolformer, and API function calling.
+3. **Nine practical slides:** a drawing command, local execution, a weather tool, returned data, a new request with context, and the final answer.
+
+Use Next, numbered pages, arrow keys, or horizontal swipes. The final page opens the lab. The opening page shows only Start; app controls appear in the lab.
+
+Large chat messages distinguish user requests, model text, structured tool calls, and tool results. Function execution appears separately as an application action. “Подробнее” shows highlighted explanatory JSON, not an exact API payload.
+
+The drawing and weather examples are scripted. Weather returns detailed English JSON. The application sends it back with the original Russian question and prior tool call. Only then does the model give a short Russian answer. Each model call receives its context explicitly.
+
+Historical dates and sources are recorded in [tool-calling history](docs/tool-calling-history.md).
+
+## Chat and Voice lab
+
+Open `/#draw` for Chat or `/#voice` for Voice. The desktop layout has three columns: conversation, tool calls, and a square canvas.
+
+Try:
+
+- “Draw a red circle using SVG.” Then: “No, make it blue.”
+- “Draw an animated solar system in JavaScript.”
+- “Make the site cream with dark text and a serif font.” Then: “Restore the original theme.”
+
+The tool pane shows model waiting time, tool generation, and completion. Completed rows show total time; hover the timer for model/transfer and local execution time.
+
+Drawings survive switches between Chat and Voice. A new Voice connection has separate conversation context; the model may need to replace an existing drawing if its source is unavailable. Reset clears the canvas and conversation. Reload starts a new drawing.
+
+### Tools
+
+| Tool | Action |
+| --- | --- |
+| `draw_svg` | Replace the canvas with a complete SVG document. |
+| `update_svg` | Replace one exact, unique fragment of the current SVG source. |
+| `draw_js` | Replace the canvas with an animated JavaScript scene. |
+| `read_site_css` | Read the current site stylesheet and revision. |
+| `edit_site_css` | Apply exact replacements to the stylesheet. |
+| `replace_site_css` | Replace the complete stylesheet. |
+| `reset_site_css` | Restore the original theme. |
+| `end_conversation` | Stop Voice; unavailable to Chat. |
+
+Open the settings button beside **Tool calls** to toggle tools, or use **All on / All off**. The heading shows the selected count.
+
+**Voice starts with all eight tools enabled, independent of Chat settings.** Each mode saves its own selection in the browser. Chat captures the selection for a whole turn. Voice captures it when connecting; reconnect after changes. All off sends no tools. The server supplies the schemas and rejects disabled tool calls.
+
+Chat uses seven executable tools. The selector also displays the eighth, marked **Voice only**; Chat filters it out before sending the request.
+
+### Models and microphone
+
+The top-right cog contains model, reasoning, and microphone settings.
+
+- Thinking models: **Astra, Sol, Terra, Luna**. Default: **Terra**.
+- Reasoning effort: Low, Medium, High, Extra high, Maximum. Default: **Medium**.
+- Microphone: Automatic, System default, or a specific device. Automatic prefers AirPods when available.
+- **Test microphone:** a local input-level meter. It sends no audio to the API and does not play audio through speakers.
+
+Model and reasoning choices apply to the next Chat turn or Voice connection. Microphone selection applies to the next Voice connection. Stop Voice before testing the microphone. Closing Settings or leaving the view stops the test. If the selected device is missing, the app reports its fallback to the system default.
+
+Start Voice, allow microphone access, and speak. The bubble responds to assistant audio; captions show the current speech. The microphone toggle beside Settings appears only while connected. Muting it stops your input while the agent can keep speaking and drawing. Stop, Reset, or leaving Voice releases audio resources.
+
+`gpt-live-1` handles speech and delegates drawing and theme work to the selected thinking model. The default backend is `gpt-5.6-terra`. The key needs access to both. Sessions last at most ten minutes and do not reconnect automatically. See [Voice delegation notes](docs/voice-tool-delegation.md) for the handoff and validation details.
+
+`OPENAI_DRAW_MODEL` and `OPENAI_VOICE_DRAW_MODEL` set server fallbacks when a request omits a model selection. Browser settings send an explicit model choice.
+
+### Drawings and theme changes
+
+SVG supports complete documents, including paths, text, gradients, groups, and filters. SVG runs in image context; scripts and external resources are disabled. Save exports the drawing as SVG.
+
+JavaScript draws Canvas 2D frames with `ctx`, `width`, `height`, and elapsed `time`. Instructions require visible animation. Rendering uses a worker and OffscreenCanvas with `requestAnimationFrame`, one frame in flight, and no fixed FPS cap. Playback does not convert frames to PNG. **Save PNG** captures the current frame.
+
+Generated code has no DOM, network, imports, or custom timers. Each frame has a two-second execution limit; source is limited to 100,000 characters per call. Errors appear in the app and require a user retry. There are no canvas-reading or screenshot tools, so the model cannot visually inspect its output.
+
+All site styling lives in [public/site.css](public/site.css). Theme tools can change colors, layout, animations, fonts, and web-font imports. Changes apply in browser memory and survive navigation. They do not edit the file on disk.
+
+**Refresh, Reset theme, or `Alt+Shift+R` restores the original CSS.** Reset canvas is separate. CSS changes require the current revision and must parse before they apply.
+
+### API inspector and logs
+
+The inspector below the lab separates outgoing Request from incoming Response. **Simple** shows message text, tool names, and short results. Raw views retain the complete JSON. Request never contains response status; Response shows loading until the model output is complete. Highlighting and Copy help inspect finished entries.
+
+Chat sends tool results with prior context in a new Responses API request, with a limit of 32 calls per user message. Voice sends tool results back to its delegated backend before continuing. Its inspector retains the latest 200 control events and excludes continuous audio packets and transcript fragments.
+
+Inspectable request bodies stay in browser memory and clear on Reset. Authentication headers and API keys are excluded.
+
+The Vite development and preview servers provide `/api/draw/status`, `/api/draw/turn`, and the `/api/voice` WebSocket. Only the lesson can run without these endpoints.
+
+Operational metadata is saved under `.local/`:
+
+- `draw-api.jsonl`: request outcome, duration, model, provider response IDs, and usage.
+- `voice-api.jsonl`: session outcome, configured tool names, tool timings, delegated responses, and usage.
+
+These disk logs exclude message content, audio, credentials, and drawing source. Unknown cost stays `null`, not zero. Voice close waits for final usage; timeouts or lost connections leave it unconfirmed.
+
+## Build and verification
 
 ```sh
-npm run build
-npm test
-npx playwright install chromium
-npx playwright test
+make build
+make test
 ```
 
-The browser tests exercise every lesson step, drawing results, chat avatars, teaching JSON, keyboard navigation, mobile layout, and cancellation when navigating away from an active animation.
+The current verification includes 55 passing Node tests and managed browser checks for tool selection, drawing execution, API inspection, microphone controls, and responsive layouts. A real Live API check used locally synthesized speech to trigger `draw_svg`, return its result, and continue the response. Physical microphone hardware was not part of that automated check.
 
-## Real API example
+Browser specifications live in [tests/browser](tests/browser). The Playwright Test configuration currently targets port **5173**, separate from `make dev` on **5180**. Do not reuse an unrelated service on 5173 when running those specifications. Latest browser verification used the managed Playwright CLI against 5180; it was not a full Playwright Test runner pass.
 
-The repository includes `examples/lesson.mjs` for both lesson examples. Run it on a server, never in the browser. Real model calls incur usage charges; its weather data is a fixed teaching fixture.
+## Standalone API example
+
+[examples/lesson.mjs](examples/lesson.mjs) implements the drawing command and weather loop with real API calls. It uses `OPENAI_API_KEY` from the environment and writes `drawing.svg`. Weather data remains a fixed teaching fixture.
+
+With the key set in the shell environment:
 
 ```sh
-npm install --no-save openai
-# Set OPENAI_API_KEY in your environment through your usual secret manager.
 node examples/lesson.mjs
 ```
 
-The first API call requests `draw_circle`. The function writes `drawing.svg` without returning data, and that task ends. The weather example requests `get_weather`, runs it, then makes a new API call with the question, every model output item, and the weather result matched by call ID. The example uses three model calls in total and stops on errors.
+The example makes three model calls: one drawing call and two weather calls. The weather continuation includes the original question, all previous model output items, and the tool result matched by call ID. If a command-only conversation continues, it must also return a success or failure tool result.
 
-If a conversation continues after a command without a return value, send a success or failure status as its tool result. The existing `examples/agent.mjs` remains available for the longer red-circle-to-blue drawing loop with the drawer's validated shape store.
-
-## Sources
-
-- [Attention Is All You Need (2017)](https://arxiv.org/abs/1706.03762)
-- [OpenAI API introduction (2020)](https://openai.com/index/openai-api/)
-- [Function calling introduction (2023)](https://openai.com/index/function-calling-and-other-api-updates/)
-- [OpenAI function calling guide](https://developers.openai.com/api/docs/guides/function-calling)
-
-Built with vanilla JavaScript, CSS, and Vite. No backend is needed for the lesson. Respects reduced-motion preferences. Fonts use Google Fonts with system fallbacks.
-
-## SVG drawer
-
-The settings button beside **Tool calls** opens the tool list for the current mode. Each tool has a switch; **All on** and **All off** make the demonstration quick. All tools start enabled. The browser remembers the selection across mode switches and reloads. Reset canvas keeps these settings.
-
-Chat and Voice save independent selections. Voice starts with all eight tools enabled, even when Chat has tools disabled. Chat sends the selected tools with the next message and keeps that selection for the whole turn. Voice uses the selection at connection time; reconnect to apply changes. `end_conversation` is marked Voice only and can also be disabled. The Stop button remains available. All off sends an empty tool list and the model can only answer with text. Simple logs show `tools: "None"`; raw logs show the exact provider tool list. The server owns and validates tool definitions, and disabled tool calls cannot execute.
-
-Live Chat and Voice can draw a complete scene in one call:
-
-- `draw_js({code})` draws animated Canvas 2D scenes. The app runs the frame body with `ctx`, `width`, `height`, and `time` (elapsed seconds), on a cleared 640×640 canvas. Instructions require visible motion. Try “Draw an animated solar system in JavaScript.”
-- `draw_svg({svg})` accepts a complete SVG document. Paths, text, groups, gradients, masks, filters, patterns, and transforms are supported. It has no basic-shape count, geometry, or color restriction. Try “Draw an SVG koi fish with flowing fins and gradients.”
-- `update_svg({find, replace})` edits one exact, unique fragment of the current SVG source. It preserves the rest of the drawing. It rejects missing or ambiguous matches and invalid SVG.
-- `draw_js` and `draw_svg` replace the entire canvas. Canvas-reading, basic-shape creation, and screenshot tools are no longer offered. Previous source is available in conversation context; there are no model image checks.
-
-Drawings and their source survive Chat/Voice navigation. Reset clears them. JavaScript drawings export their current frame as PNG; SVG drawings export as SVG with the document embedded as an image.
-
-JavaScript runs in a worker inside an opaque-origin sandbox frame. Its CSP blocks network and external scripts; each frame has a two-second execution limit. The visible sandbox frame owns a real HTML canvas and transfers it directly to its worker through OffscreenCanvas. The page schedules frames with requestAnimationFrame, with one frame in flight and no fixed FPS cap. Playback performs no PNG encoding or pixel readback. PNG encoding happens only when Save PNG is clicked. Syntax and runtime errors appear on the page. Failed code does not trigger an automatic model retry. New-code errors preserve the previous drawing; errors after animation starts stop the scene. Reset, replacement and navigation stop its worker; returning to Chat or Voice restarts a healthy saved animation. Failed scenes stay stopped until the user requests a new drawing. DOM access, external libraries and model-created timers are unsupported. SVG is rendered only in image context; scripts and external resources do not run. Source is limited to 100,000 characters per call. This is a local presentation tool, not a general-purpose hostile-code execution service.
-
-Implementation references: [worker CSP inheritance](https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API/Using_web_workers), [OffscreenCanvas transfer](https://developer.mozilla.org/en-US/docs/Web/API/HTMLCanvasElement/transferControlToOffscreen), [requestAnimationFrame](https://developer.mozilla.org/en-US/docs/Web/API/Window/requestAnimationFrame), and [SVG image restrictions](https://developer.mozilla.org/en-US/docs/Web/SVG/Guides/SVG_as_an_image). Browser checks cover the actual renderer; provider responses are simulated during automated checks.
-
-Open `/#draw` or choose **Рисовать** in the lesson header. The desktop view has three columns: chat, tool calls, and a square drawing canvas.
-
-Try **Draw a red circle**, then **No, make it blue**. The update edits the existing SVG. The side pane immediately shows Thinking with an elapsed timer. Streaming reveals the tool name while its arguments are still being generated. The completed row shows total time from that model request through execution (first frame for animations). Hover the timer for model/transfer time and local execution time separately. Each new API request gets its own timer; plain text responses leave no tool row. Save SVG exports the current drawing. Reset clears the canvas and conversation.
-
-The API log below the drawer opens each new call on the Simple tab. Separate Request and Response sections show compact teaching JSON: message text, tool names, and short results such as “Drawing updated.” It hides code, arguments, IDs, model settings, image data, and request timing. Long context shows six recent messages plus a count of earlier messages. The raw Request and Response tabs retain complete JSON. Request contains only outgoing data; the server sends the exact provider payload to the inspector before waiting for completion. Response shows a loading indicator until the full model output arrives, including during tool-argument generation. The indicator is UI state, not fabricated response JSON. Response timing appears only in the Response tab. JSON supports highlighting and Copy; pending responses cannot be copied. Successful calls show the model request body and response body. Failed calls show the application error response. Authentication headers and API keys are excluded. These inspectable bodies stay in browser memory and clear on Reset; operational disk logs still contain metadata only.
-
-The drawer sends real tool requests through the OpenAI Responses API. It requires `OPENAI_API_KEY` in the server environment or a local `.env` file. Values in the project `.env` take priority over inherited shell settings. The top-right settings cog lists Astra, Sol, Terra, and Luna in that order for both Chat and Voice. The header shows the active model; while idle, it shows the model selected for the next turn or session. Terra is the default. Reasoning effort offers Low, Medium, High, Extra high, and Maximum; Medium is the default. Both selections are saved in this browser and apply to the next Chat turn or Voice session. `OPENAI_DRAW_MODEL` sets the fallback for API requests without a model selection. Restart Vite after changing environment settings. The server key is never sent to the browser. Missing configuration or provider errors do not switch to simulated responses.
-
-The Vite development and preview servers provide `/api/draw/status` and `/api/draw/turn`. Chat and Voice require their server endpoints; the lesson can run as a static site. API calls use provider credits. The browser executes validated drawing tools and sends their results with the full earlier context in a new request. It stops after 32 model calls per user message, allowing several tool actions in one turn. Chat uses [streaming function calls](https://developers.openai.com/api/docs/guides/function-calling#streaming); disconnecting the client aborts the provider request.
-
-Backend request metadata is persisted in `.local/draw-api.jsonl`. Records contain route, status, duration, correlated provider response IDs, model, and provider usage when returned. They do not contain messages, drawing content, or credentials. Provider cost is recorded as unknown, not zero.
-
-The command lesson ends after one API request and local execution. The weather lesson follows two independent API requests. Amber cards represent structured tool calls; green cards represent returned data. The app resends instructions, tools, and full prior model output as context. Hosted conversation storage is an alternative to carrying history in the app; it still supplies context to each model call. See [conversation state](https://developers.openai.com/api/docs/guides/conversation-state).
-
-## Voice drawing
-
-Choose **Voice** after **Chat**, or open `/#voice`. Click **Start voice**, allow microphone access, and speak. The same canvas and `draw_svg`, `update_svg`, and animated `draw_js` tools are used. Switching between Chat and Voice keeps the drawing and saved source. A new Voice session has separate conversation context; if it lacks the source, the model must explain before replacing the drawing. Reset clears the drawing; reloading the page starts a new drawing. There is no text input in Voice. The purple bubble from `voice_chat_mcp` reacts to assistant audio playback. It settles during silence and respects reduced-motion settings. A short live caption shows the current speech. Stop, Reset, and leaving the view release the microphone and audio playback.
-
-While Voice is connected, the microphone toggle appears next to Settings. Switch it off to mute your input while the agent continues speaking and drawing. Switch it on to resume. Each new session starts with the microphone on.
-
-Settings also contains a saved microphone selector and **Test microphone**. Automatic prefers AirPods when the browser exposes them; System default uses the browser default. A specific input applies to the next Voice connection. The local test displays live input levels without sending audio to the API or playing it through speakers. Stop the test, close Settings, or change views to release the input. Stop Voice before testing. Device names may appear only after microphone permission; the list refreshes after the test starts. If a saved input is missing, the app reports when it uses the system default instead.
-
-The selector uses [device enumeration](https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/enumerateDevices) and [device-change events](https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/devicechange_event). The level meter uses a local [audio analyser](https://developer.mozilla.org/en-US/docs/Web/API/AnalyserNode).
-
-The voice implementation uses microphone timeout/cancellation helpers and a PCM playback worklet. Capture and Live delegation use the shared drawing tools.
-
-The Vite server proxies `/api/voice` to OpenAI Live over WebSocket. The project `.env` key stays on the server. `gpt-live-1` handles speech; `gpt-5.6-terra` handles drawing and theme decisions by default. Settings can select Luna, Sol, or Astra and change reasoning effort. The default effort is Medium. `OPENAI_VOICE_DRAW_MODEL` sets the fallback for sessions without a model selection. The key needs access to both models. The server validates thinking model selections and supplies the speech model, instructions, and tool definitions. No automatic reconnect occurs. Each voice session has a ten-minute limit.
-
-Tool outputs return to the delegated model before continuation. The inspector keeps the latest 200 voice control events. Continuous audio packets and transcript fragments are excluded from that JSON view. Stop requests a graceful provider close; a timeout or dropped connection leaves final usage marked unconfirmed.
-
-Voice metadata is written to `.local/voice-api.jsonl`: session outcome/duration, correlated delegated model responses, returned usage, and tool names/timings. Audio, transcripts, tool arguments, and canvas images are excluded. Cost stays unknown unless available; final voice usage and delegated-model usage remain separate.
-
-References: [Live WebSockets](https://developers.openai.com/api/docs/guides/voice-websockets), [Live delegation and tools](https://developers.openai.com/api/docs/guides/live-delegation).
-
-## Live theme editing
-
-All site styling is in `public/site.css`, with readable sections, descriptive classes, and color/font variables at the top. There are no separate component CSS files. The agent can edit every rule, including layout, gradients, animations, responsive styles, font families, weights, sizes, and web-font imports.
-
-Both Live Chat and Voice offer `read_site_css`, `edit_site_css` (exact replacements), `replace_site_css` (complete replacement), and `reset_site_css`. Try “Make the whole site a warm cream theme with dark text and a serif font,” then “Restore the original theme.”
-
-Theme edits apply immediately to the current page without restarting audio or clearing the drawing. They survive navigation between Lesson, Chat, and Voice. **Refresh or Reset theme restores the original CSS.** The file on disk stays unchanged. Reset theme also has an `Alt+Shift+R` shortcut that works if edited CSS hides the controls. Reset canvas is separate.
-
-The model receives CSS tool results but no screenshot. It must not claim visual verification.
-
-CSS edits require the latest revision, reject malformed CSS, and apply batches atomically. The existing model request logs retain their metadata-only disk logging; CSS appears only in the conversation/API inspector sent to the model.
+Built with vanilla JavaScript, CSS, and Vite. See [CHANGELOG.md](CHANGELOG.md) for changes and validation limits.

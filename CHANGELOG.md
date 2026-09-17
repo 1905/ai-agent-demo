@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Reorganized the README around setup, the Russian lesson, Chat/Voice tools, model and microphone settings, API inspection, and verification. Removed stale navigation instructions and documented independent Voice defaults and the browser-test port difference. Documentation-only change; local links and build checked.
+
 - Voice now saves its own tool selection and defaults to all eight tools, independent of disabled Chat tools. Its speech instructions describe enabled capabilities and explicitly delegate drawing, theme edits, and corrections to the tool-using backend. New connections record configured tool names in metadata.
 - Build and 55 Node tests pass. A real Live API smoke test with locally synthesized speech triggered `draw_svg`, submitted its result, continued the response, and closed with final usage and zero errors. Managed browser checks verified all eight tools in the actual Voice session payload, SVG rendering and result submission with simulated provider events, independent settings persistence, and desktop/mobile Settings layouts. The live smoke client saved the SVG to a file.
 
