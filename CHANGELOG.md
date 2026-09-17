@@ -2,6 +2,37 @@
 
 ## Unreleased
 
+- Removed the ReAct history slide and its animation. The history now covers original ChatGPT, WebGPT, Toolformer, and API function calling; lesson navigation contains fourteen pages.
+- Build, all 51 Node tests, and the updated history-sequence check pass. The final removal did not require a new browser run; preceding desktop/mobile history checks are recorded below.
+- Added original ChatGPT as the first history slide: November 30, 2022, text-only conversation without tools. A weather question gets a text reply explaining the lack of live access. The next slide explicitly returns to earlier tool-use research. Fifteen pages now lead into the lab.
+- Build and 51 Node tests pass. Managed browser checks passed for the new slide and transition at 1280×720 and 320×844, reply animation, reduced motion, pagination, and final lab entry. No live model calls were used.
+- Added four Russian history slides after Start: WebGPT (2021), ReAct (2022), Toolformer (February 2023), and OpenAI function calling (June 2023). Short JavaScript sequences show browsing, actions and results, calculator selection, and a structured drawing call. Animations stop on navigation and respect reduced motion. Fourteen pages now lead into the lab.
+- Historical dates and claims were checked against primary sources, recorded in `docs/tool-calling-history.md`. The slides present milestones rather than a single invention date.
+- Build and 51 Node tests pass. Managed browser checks verified all four history slides at 1280×720 and 320×844, animation phases, cancellation, reduced motion, calculator output, and navigation into the lesson and lab. No live model calls were used.
+- Removed the lesson header, logo, lab shortcut, and settings cog. The opening slide has only Start; lesson pagination begins after Start. The final slide opens the lab, where the full header and settings remain available.
+- Build and 51 Node tests pass. Managed browser checks passed at 1280×720 and 320×844 for opening/middle/final layouts, lab entry, settings, and return to the lesson. No live model calls were used.
+- Added a Russian opening slide with a large title, three lesson topics, staggered entrance animation, and Start. Numbered navigation now includes ten pages.
+- API logs separate Request and Response in Simple view. Loading appears only under Response and stays visible while tool arguments are generated. The raw Request receives the exact provider payload before the response finishes; response timing stays out of the Request view.
+- Build and 51 Node tests pass. Managed browser checks verified the opening slide at 1280, 390, and 320px, navigation, and reduced motion. API-log checks passed for pending tool generation, completed responses, separate follow-up context, no tools, Copy, errors, cancellation, and mobile layout. Provider responses were simulated; no paid calls were made.
+
+- JavaScript scenes now draw directly into a native canvas from the isolated worker. requestAnimationFrame replaces the 20 FPS timer. Playback no longer copies pixels or encodes PNG; Save PNG captures the visible canvas only on demand.
+- Generated JavaScript errors are shown on the page. Chat stops without another model request; Voice returns the failed tool result without requesting automatic continuation. Failed scenes stay stopped across mode changes, and the user can retry with a new message.
+- Build and 50 Node tests passed for native rendering. Managed browser checks measured 59.89 frames/second, zero playback PNG encoding, and one capture on Save PNG. Error/manual-retry, timeout, replacement, navigation, reset, and mocked Voice checks passed. No live provider or physical microphone checks were run.
+
+- Tool timing now shows Thinking immediately, then the streamed tool name during argument generation. Completed rows show total model-request-to-execution time, with separate model/transfer and execution times on hover. Chat disconnection aborts the provider stream; failed streams log error outcomes.
+- Reduced drawing tools to `draw_svg`, `update_svg`, and `draw_js`. Removed canvas/source reads, basic-shape creation, and page screenshots from Chat/Voice tool selection. CSS tools remain. Saved selections drop retired tools without re-enabling others.
+- `update_svg` now edits a unique fragment of full SVG source. `draw_js` receives elapsed `time` and is instructed to animate every drawing. The isolated renderer schedules frames, saves the current frame as PNG, and cleans up on replacement/reset/navigation.
+- Build and 49 Node tests pass, including streaming progress before completion, context/trace preservation, fragmented UTF-8 transport, failure logging, provider cancellation, tool availability, and SVG edits. Managed browser checks passed for early Chat/Voice progress, elapsed timing, raw traces, animation motion/export, source edits, retained settings, cancellation, errors, infinite-frame recovery, Voice stop-tool completion, and 320px layouts. Provider responses and microphone startup were simulated; no paid provider or physical microphone checks. Existing browser fixtures were updated and syntax-checked; checks ran through the managed CLI, not the Playwright Test runner.
+
+- Replaced the Live/Demo selector with the current thinking model in Chat and Voice. Settings changes update the idle label; active turns and voice sessions keep their actual model label. Chat now always uses the API.
+- Ordered model choices Astra, Sol, Terra, Luna. Terra remains the default and saved choices are preserved.
+- Build and 42 Node tests pass. Managed browser checks verified model labels, ordering, persistence, active Chat/Voice model consistency, API failure behavior, and headers at 1280/1024/320px. Model responses and microphone activity were simulated. Former Demo browser fixtures now use API mocks; those test files were syntax-checked.
+
+- Added a live enabled/total count beside Tool calls in Chat and Voice. Individual toggles and All on/off update it immediately; saved selections show on reload.
+
+- Chat now renders fenced code and ASCII drawings in monospace blocks with preserved spacing and line breaks. Fence markers and language labels are hidden; model HTML remains escaped.
+- Build and 42 Node tests pass. Managed browser checks verified box/hat drawings, unfinished blocks, preserved trailing spaces, inert HTML, empty replies, and contained horizontal scrolling at 320px. Provider responses were simulated.
+
 - Removed internal workspace references from voice implementation comments and documentation.
 
 - Added Tool settings beside the Tool calls heading in Chat and Voice: individual switches, All on/off, and shared saved preferences. Includes the Voice-only stop tool.

@@ -1,8 +1,8 @@
 import { mountDrawer } from './drawer.js';
-import { settingsButton, mountSettings } from './settings.js';
 import { lessonExample, createLessonFlow } from './lesson.js';
 import { shapeMarkup } from './drawing-tools.js';
 import { highlightJson } from './drawing-log.js';
+import { historySlides, historyDates, historyScene, animateHistory } from './lesson-history.js';
 
 const lessonFlow = createLessonFlow();
 
@@ -17,6 +17,8 @@ const paths = {
 };
 const icon = name => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name]}</svg>`;
 const slides = [
+  ['От слов к действиям.', 'Как работают инструменты ИИ.', 'intro'],
+  ...historySlides,
   ['Обычный ответ.', 'Модель получает текст и возвращает текст.', 'text'],
   ['Дадим модели инструмент.', 'В запросе есть сообщение и описание доступной функции.', 'define'],
   ['Модель возвращает вызов.', 'Это не текст: имя инструмента и параметры.', 'tool-call'],
@@ -29,6 +31,7 @@ const slides = [
 ];
 let step = 0, generation = 0;
 let executed = false;
+let stopHistory;
 const $ = selector => document.querySelector(selector);
 const stage = () => slides[step][2];
 const canvasPreview = (visible = true) => `<svg class="lesson-canvas" viewBox="0 0 640 640" role="img" aria-label="${visible ? 'Красный круг' : 'Пустой холст'}">${visible ? shapeMarkup(lessonFlow.command.shape) : ''}</svg>`;
@@ -78,7 +81,9 @@ const chat = content => `<div class="lesson-chat">${content}</div>`;
 const executionPanel = weather => `<section class="lesson-function-panel ${executed ? 'is-complete' : 'is-running'}" aria-label="Действие в приложении"><div class="lesson-function-header"><span>${icon('code')}Ваше приложение</span><span role="status">${executed ? 'Выполнено' : 'Выполняется…'}</span></div><div class="lesson-function-body"><span class="lesson-function-name">${weather ? 'get_weather' : 'draw_circle'}</span><div class="lesson-function-output" aria-live="polite">${weather ? executed ? `${weatherJson()}<span class="lesson-fixture">Учебные данные</span>` : '<span class="lesson-function-placeholder">Получаем погоду…</span>' : `<div class="lesson-drawn-result">${canvasPreview(executed)}<p>${executed ? 'Круг нарисован.' : 'Рисуем круг…'}</p></div>`}</div></div></section>`;
 
 function scene() {
+  if (historyDates[stage()]) return historyScene(stage(), avatar);
   switch (stage()) {
+    case 'intro': return `<ol class="lesson-overview" aria-label="Что разберём"><li><span class="lesson-overview-symbol">${avatar('user')}</span><span>Запрос и ответ</span></li><li><span class="lesson-overview-symbol">${avatar('ai')}</span><span>Вызов инструмента</span></li><li><span class="lesson-overview-symbol">${avatar('code')}</span><span>Результат и контекст</span></li></ol>`;
     case 'text': return chat(`${message('Запрос', `<p>${lessonExample.textRequest}</p>`, 'text')}${message('Ответ · текст', `<p>${lessonExample.textResponse}</p>`, 'text-answer', 'text-message chat-reply')}`);
     case 'define':
     case 'weather': return chat(requestMessage(stage() === 'weather'));
@@ -95,9 +100,15 @@ function scene() {
 }
 
 function render() {
+  stopHistory?.();
   document.documentElement.lang = 'ru';
   const [title, description, type] = slides[step];
-  $('#app').innerHTML = `<div class="reading-progress" role="progressbar" aria-label="Прогресс урока" aria-valuemin="0" aria-valuemax="${slides.length - 1}" aria-valuenow="${step}"><div style="transform:scaleX(${step / (slides.length - 1)})"></div></div><header class="lesson-header"><a href="#" id="home" class="brand" aria-label="Agent lab — начать урок заново"><span class="brand-mark"></span>agent lab</a><a href="#draw" class="lesson-draw-link">Рисовать ↗</a></header><main><div class="lesson-copy"><h1 tabindex="-1">${title}</h1><p>${description}</p></div><section class="lesson-stage ${type}" aria-label="Интерактивный урок">${scene()}</section><footer><button id="back" class="lesson-back" aria-label="Предыдущий шаг" ${step === 0 ? 'disabled' : ''}>${icon('arrow')}</button><nav class="lesson-pagination" aria-label="Страницы урока">${slides.map((slide, index) => `<button data-page="${index}" aria-label="Страница ${index + 1}: ${slide[0]}" ${index === step ? 'aria-current="page"' : ''}>${index + 1}</button>`).join('')}</nav><button id="next" class="lesson-next">${step === slides.length - 1 ? 'Сначала' : 'Далее'}${icon(step === slides.length - 1 ? 'replay' : 'arrow')}</button></footer></main><dialog id="request-detail" class="lesson-json-dialog" aria-labelledby="request-detail-title"><div class="settings-heading"><h2 id="request-detail-title">Учебный JSON</h2><button type="button" class="settings-close" aria-label="Закрыть JSON">×</button></div><p>Упрощённая схема для объяснения, не формат API.</p><pre tabindex="0" aria-label="JSON для объяснения"><code></code></pre></dialog>`;
+  const opening = type === 'intro';
+  const final = step === slides.length - 1;
+  const history = historyDates[type];
+  const progress = opening ? '' : `<div class="reading-progress" role="progressbar" aria-label="Прогресс урока" aria-valuemin="0" aria-valuemax="${slides.length - 1}" aria-valuenow="${step}"><div style="transform:scaleX(${step / (slides.length - 1)})"></div></div>`;
+  const pagination = opening ? '' : `<button id="back" class="lesson-back" aria-label="Предыдущий шаг">${icon('arrow')}</button><nav class="lesson-pagination" aria-label="Страницы урока">${slides.map((slide, index) => `<button data-page="${index}" aria-label="Страница ${index + 1}: ${slide[0]}" ${index === step ? 'aria-current="page"' : ''}>${index + 1}</button>`).join('')}</nav>`;
+  $('#app').innerHTML = `${progress}<main class="lesson-page ${opening ? 'lesson-opening' : ''} ${final ? 'lesson-final' : ''} ${history ? 'lesson-history' : ''}"><div class="lesson-copy">${history ? `<p class="history-date">${history}</p>` : ''}<h1 tabindex="-1">${type === 'intro' ? '<span>От слов</span><span>к <em>действиям.</em></span>' : title}</h1><p>${description}</p></div><section class="lesson-stage ${type}" aria-label="Интерактивный урок">${scene()}</section><footer>${pagination}<button id="next" class="lesson-next">${final ? 'В лабораторию' : opening ? 'Начать' : 'Далее'}${icon('arrow')}</button></footer></main><dialog id="request-detail" class="lesson-json-dialog" aria-labelledby="request-detail-title"><div class="settings-heading"><h2 id="request-detail-title">Учебный JSON</h2><button type="button" class="settings-close" aria-label="Закрыть JSON">×</button></div><p>Упрощённая схема для объяснения, не формат API.</p><pre tabindex="0" aria-label="JSON для объяснения"><code></code></pre></dialog>`;
   const jsonDialog = $('#request-detail');
   jsonDialog.querySelector('button').onclick = () => jsonDialog.close();
   jsonDialog.onclick = event => {
@@ -105,18 +116,22 @@ function render() {
     const rect = jsonDialog.getBoundingClientRect();
     if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) jsonDialog.close();
   };
-  $('#next').onclick = () => navigate(step === slides.length - 1 ? 0 : step + 1);
-  $('#back').onclick = () => navigate(step - 1);
+  $('#next').onclick = () => {
+    if (final) location.hash = '#draw';
+    else navigate(step + 1);
+  };
+  const back = $('#back');
+  if (back) back.onclick = () => navigate(step - 1);
   document.querySelectorAll('[data-page]').forEach(button => {
     button.onclick = () => navigate(+button.dataset.page);
   });
-  const pagination = $('.lesson-pagination');
-  const selectedPage = pagination.querySelector('[aria-current]');
-  pagination.scrollLeft = selectedPage.offsetLeft - (pagination.clientWidth - selectedPage.offsetWidth) / 2;
-  $('#home').onclick = e => { e.preventDefault(); navigate(0); };
+  const pages = $('.lesson-pagination');
+  if (pages) {
+    const selectedPage = pages.querySelector('[aria-current]');
+    pages.scrollLeft = selectedPage.offsetLeft - (pages.clientWidth - selectedPage.offsetWidth) / 2;
+  }
   bindScene();
-  $('.lesson-header').insertAdjacentHTML('beforeend', settingsButton);
-  mountSettings($('#app'), { language: 'ru' });
+  stopHistory = animateHistory($('.history-visual'));
 }
 
 function navigate(n) {
@@ -175,6 +190,7 @@ document.addEventListener('touchend', e => {
 }, { passive: true });
 let unmountDrawer;
 function route() {
+  stopHistory?.();
   generation++;
   unmountDrawer?.();
   unmountDrawer = null;

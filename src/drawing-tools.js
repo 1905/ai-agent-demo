@@ -34,6 +34,7 @@ export function createDrawingStore() {
   const read = () => ({ width: CANVAS_SIZE, height: CANVAS_SIZE, version, shapes: structuredClone(shapes), ...(artwork ? { artwork: structuredClone(artwork) } : {}) });
   return {
     read,
+    setArtworkError(error) { if (artwork?.type === 'js') artwork.error = error; },
     reset() { shapes = []; sequence = 0; version = 0; artwork = null; },
     // Only the browser renderer supplies artwork; model arguments never call this directly.
     replaceArtwork(value) {

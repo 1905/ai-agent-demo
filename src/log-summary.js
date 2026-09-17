@@ -61,7 +61,7 @@ function simplifyRequest(request) {
 }
 
 function simplifyResponse(response) {
-  if (!response) return 'Waiting…';
+  if (!response) return null;
   if (response.error) return { error: short(typeof response.error === 'string' ? response.error : response.error.message) };
   const event = response.event || response;
   const body = event.response || event;

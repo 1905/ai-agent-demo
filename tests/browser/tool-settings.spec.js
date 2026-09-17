@@ -23,15 +23,15 @@ test.beforeEach(async ({ page }) => {
   await page.route('**/api/draw/turn', route => route.abort());
 });
 
-test('all twelve switches are accessible, keyboard controlled and persistent', async ({ page }) => {
+test('all eight switches are accessible, keyboard controlled and persistent', async ({ page }) => {
   await page.goto('/#draw');
   await open(page);
-  await expect(page.getByRole('switch')).toHaveCount(12);
-  expect(await selected(page)).toHaveLength(12);
+  await expect(page.getByRole('switch')).toHaveCount(8);
+  expect(await selected(page)).toHaveLength(8);
   await page.locator('[data-tools="off"]').click();
   expect(await selected(page)).toEqual([]);
   await page.locator('[data-tools="on"]').click();
-  expect(await selected(page)).toHaveLength(12);
+  expect(await selected(page)).toHaveLength(8);
   await page.locator('[data-tools="off"]').click();
   await page.locator('input[name="draw_svg"]').focus();
   await page.keyboard.press('Space');
@@ -80,7 +80,7 @@ test('Chat captures allowed tools for the entire turn and blocks fabricated disa
   await expect(page.locator('#draw-prompt')).toBeEnabled();
   expect(requests[0].enabledTools).toEqual([]);
   await expect(page.locator('.tool-entry, #artwork-layer')).toHaveCount(0);
-  expect(JSON.parse(await page.locator('#api-log code').innerText()).request.tools).toBe('None');
+  expect(JSON.parse(await page.locator('#api-log [aria-label="Simple request JSON"] code').innerText()).tools).toBe('None');
   await select(page, ['draw_svg']);
   await send('Draw SVG');
   await started;

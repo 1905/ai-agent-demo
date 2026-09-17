@@ -50,7 +50,7 @@ test('voice defaults to Terra with server-owned speech and tools; image outputs 
     if (event.type === 'session.start') startProvider(socket);
     if (event.type === 'session.input_audio.append') {
       send(socket, { type: 'response.event', delegation_id: 'delegation_1', event: { type: 'response.created', response: { id: 'response_1', model: 'gpt-5.6-terra' } } });
-      for (const type of ['response.output_item.added', 'response.output_item.done']) send(socket, { type: 'response.event', event: { type, item: { type: 'function_call', name: 'read_canvas', call_id: 'call_1', arguments: '{}' } } });
+      for (const type of ['response.output_item.added', 'response.output_item.done']) send(socket, { type: 'response.event', event: { type, item: { type: 'function_call', name: 'draw_svg', call_id: 'call_1', arguments: '{}' } } });
     }
     if (event.type === 'response.create') send(socket, { type: 'response.event', delegation_id: 'delegation_1', event: { type: 'response.completed', response: { id: 'response_1', model: 'gpt-5.6-terra', usage: { total_tokens: 42 } } } });
     if (event.type === 'session.close') send(socket, { type: 'session.closed', usage: { seconds: 3 } });
@@ -108,6 +108,30 @@ test('voice allows a thinking model choice only at session start', async t => {
   assert.equal(sent.filter(event => event.type === 'session.start').length, 1);
 });
 
+test('failed JavaScript waits for the user instead of automatically continuing the model', async t => {
+  let call = 0;
+  const { client, sent, received } = await setup(t, (socket, event) => {
+    if (event.type === 'session.start') startProvider(socket);
+    if (event.type === 'session.input_audio.append') send(socket, { type: 'response.event', event: {
+      type: 'response.output_item.done', item: { type: 'function_call', name: 'draw_js', call_id: `js-${++call}`, arguments: '{"code":"bad code"}' },
+    } });
+    if (event.type === 'session.close') send(socket, { type: 'session.closed' });
+  });
+  send(client, { type: 'session.start', enabledTools: ['draw_js'] });
+  await until(() => received.find(event => event.type === 'session.started'));
+  send(client, { type: 'session.input_audio.append', audio: 'AAAA' });
+  await until(() => received.find(event => event.event?.item?.call_id === 'js-1'));
+  send(client, { type: 'tool.result', call_id: 'js-1', output: '{"error":"Unexpected token","retryByUser":true}', failed: true });
+  await until(() => sent.find(event => event.type === 'response.item.create'));
+  // A round trip after the failed result proves all preceding events have been processed.
+  send(client, { type: 'session.input_audio.append', audio: 'AAAA' });
+  await until(() => received.find(event => event.event?.item?.call_id === 'js-2'));
+  assert.equal(sent.filter(event => event.type === 'response.create').length, 0);
+  send(client, { type: 'tool.result', call_id: 'js-2', output: '{"action":"drawn"}', failed: false });
+  await until(() => sent.find(event => event.type === 'response.create'));
+  assert.equal(sent.filter(event => event.type === 'response.create').length, 1);
+});
+
 test('invalid voice thinking model never opens a provider connection', async t => {
   const { client, sent, received } = await setup(t, () => assert.fail('Provider must not receive a request'));
   send(client, { type: 'session.start', model: 'not-allowed' });
@@ -117,7 +141,7 @@ test('invalid voice thinking model never opens a provider connection', async t =
 });
 
 test('Voice freezes selected tools at connection start and All off removes every tool', async t => {
-  for (const enabledTools of [[], ['draw_js'], ['read_canvas', 'end_conversation']]) {
+  for (const enabledTools of [[], ['draw_js'], ['draw_svg', 'end_conversation']]) {
     const { client, sent, received } = await setup(t, (socket, event) => {
       if (event.type === 'session.start') startProvider(socket);
       if (event.type === 'session.close') send(socket, { type: 'session.closed' });

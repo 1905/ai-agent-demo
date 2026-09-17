@@ -73,7 +73,7 @@ export class VoiceSession {
   }
   receive(event, generation) {
     if (event.type === 'voice.request') { this.onEvent('request', event.event); return; }
-    if (['session.started', 'session.closed', 'session.delegation.created', 'error', 'voice.failure'].includes(event.type) || (event.type === 'response.event' && ['response.created', 'response.output_item.done', 'response.completed', 'response.failed'].includes(event.event?.type))) this.onEvent('response', event);
+    if (['session.started', 'session.closed', 'session.delegation.created', 'error', 'voice.failure'].includes(event.type) || (event.type === 'response.event' && ['response.created', 'response.output_item.added', 'response.output_item.done', 'response.completed', 'response.failed', 'response.incomplete'].includes(event.event?.type))) this.onEvent('response', event);
     if (event.type === 'voice.ended') { if (!event.finalized) this.onError('Voice stopped. Final provider usage could not be confirmed.'); this.finish(); return; }
     if (event.type === 'voice.ending') { this.stop(); return; }
     if (this.state === 'stopping') return;

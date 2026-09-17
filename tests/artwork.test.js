@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { validateArtworkArgs, artworkTools } from '../src/artwork-tools.js';
+import { validateArtworkArgs, artworkTools, updateSvgSource } from '../src/artwork-tools.js';
 import { createDrawingStore, exportDrawing } from '../src/drawing-tools.js';
 import { agentTools } from '../src/agent-tools.js';
 import { voiceSessionConfig } from '../server/voice-api.js';
@@ -52,4 +52,21 @@ test('Chat and Voice expose the same complete-scene tools', () => {
     assert.equal(tool.strict, true);
     assert.equal(tool.parameters.additionalProperties, false);
   }
+});
+
+test('SVG updates change exactly one source fragment and reject missing or ambiguous edits', () => {
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg"><circle id="ball" fill="red"/><path id="hat"/></svg>';
+  assert.equal(updateSvgSource(svg, { find: 'fill="red"', replace: 'fill="blue"' }), svg.replace('fill="red"', 'fill="blue"'));
+  assert.throws(() => updateSvgSource(svg, { find: 'missing', replace: '' }), /exactly once/);
+  assert.throws(() => updateSvgSource(svg, { find: 'id=', replace: '' }), /exactly once/);
+  assert.throws(() => updateSvgSource(null, { find: 'red', replace: 'blue' }), /no SVG/);
+  assert.throws(() => updateSvgSource(svg, { find: '', replace: '' }), /must not be empty/);
+  assert.throws(() => updateSvgSource(svg, { find: 'red', replace: 12 }));
+});
+
+test('only the new drawing tools are exposed and JavaScript explicitly requires animation', () => {
+  const names = agentTools.map(tool => tool.name);
+  assert.deepEqual(names, ['draw_js', 'draw_svg', 'update_svg', 'read_site_css', 'edit_site_css', 'replace_site_css', 'reset_site_css']);
+  assert.match(artworkTools.find(tool => tool.name === 'draw_js').description, /Always include visible, continuous motion using time/);
+  assert.deepEqual(voiceSessionConfig({}).delegation.responses.tools.map(tool => tool.name), [...names, 'end_conversation']);
 });

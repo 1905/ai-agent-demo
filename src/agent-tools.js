@@ -1,8 +1,7 @@
-import { drawingTools } from './drawing-tools.js';
 import { themeTools } from './theme-tools.js';
 import { artworkTools } from './artwork-tools.js';
 
-export const agentTools = [...drawingTools, ...artworkTools, ...themeTools];
+export const agentTools = [...artworkTools, ...themeTools];
 
 export const endConversationTool = { type: 'function', name: 'end_conversation', description: 'End the voice session when the user says goodbye or asks to stop talking.', strict: true, parameters: { type: 'object', properties: {}, required: [], additionalProperties: false } };
 export const allAgentTools = [...agentTools, endConversationTool];

@@ -11,7 +11,12 @@ test.beforeEach(async ({ page }) => {
     };
   });
   await page.route('**/api/draw/status', route => route.fulfill({ json: { configured: true } }));
-  await page.route('**/api/draw/turn', route => route.abort());
+  await page.route('**/api/draw/turn', route => {
+    const body = route.request().postDataJSON();
+    const completed = body.input.some(item => item.type === 'function_call_output' && item.call_id === 'theme-red');
+    const calls = completed ? [] : [{ type: 'function_call', call_id: 'theme-red', name: 'draw_svg', arguments: JSON.stringify({ svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 640"><circle id="ball" cx="320" cy="320" r="100" fill="#ef5350"/></svg>' }) }];
+    return route.fulfill({ json: { calls, inputItems: calls, text: calls.length ? '' : 'Drew a red circle.' } });
+  });
   await page.goto('/#draw');
   await page.evaluate(async () => {
     // Vite can append a cache timestamp; use the module already loaded by the app.
@@ -60,7 +65,7 @@ test('theme edits are atomic, survive tabs, and can recover hidden controls', as
 });
 
 test('rendered screenshot includes the current SVG and keeps its identity', async ({ page }) => {
-  await page.locator('#draw-mode').selectOption('demo');
+  await expect(page.locator('#draw-send')).toBeEnabled();
   await page.locator('#draw-prompt').fill('Draw a red circle');
   await page.locator('#draw-send').click();
   await expect(page.locator('#draw-prompt')).toBeEnabled();
@@ -71,7 +76,7 @@ test('rendered screenshot includes the current SVG and keeps its identity', asyn
     const image = new Image(); image.src = imageUrl; await image.decode();
     const canvas = document.createElement('canvas'); canvas.width = image.width; canvas.height = image.height;
     const context = canvas.getContext('2d'); context.drawImage(image, 0, 0);
-    const circle = document.querySelector('#shape-layer circle').getBoundingClientRect();
+    const circle = document.querySelector('#artwork-layer').getBoundingClientRect();
     const app = document.querySelector('#app').getBoundingClientRect();
     const scale = image.width / app.width;
     return [...context.getImageData((circle.x + circle.width / 2 - app.x) * scale, (circle.y + circle.height / 2 - app.y) * scale, 1, 1).data];
@@ -79,5 +84,5 @@ test('rendered screenshot includes the current SVG and keeps its identity', asyn
   expect(Math.abs(pixel[0] - 239)).toBeLessThan(5);
   expect(Math.abs(pixel[1] - 83)).toBeLessThan(5);
   expect(Math.abs(pixel[2] - 80)).toBeLessThan(5);
-  await expect(page.locator('#shape-layer circle')).toHaveAttribute('data-shape-id', 'shape-1');
+  await expect(page.locator('#artwork-layer')).toHaveCount(1);
 });

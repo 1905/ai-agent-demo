@@ -26,7 +26,7 @@ test('simple view shows carried tool results without image payloads and handles 
   assert.equal(simple.response.text, 'Canvas is empty.');
   assert.doesNotMatch(JSON.stringify(simple), /PRIVATE_IMAGE/);
   assert.deepEqual(simplifyApiEntry({ request: { input: [] }, response: { error: 'Provider failed' } }).response, { error: 'Provider failed' });
-  assert.equal(simplifyApiEntry({ request: { input: [] }, response: null }).response, 'Waiting…');
+  assert.equal(simplifyApiEntry({ request: { input: [] }, response: null }).response, null);
 });
 
 test('Simple hides drawing source and long history; raw entries keep all details', () => {
@@ -52,4 +52,13 @@ test('Simple makes an empty tool selection explicit', () => {
   for (const selection of [{ tools: [] }, { enabledTools: [] }]) {
     assert.equal(simplifyApiEntry({ request: { input: [{ role: 'user', content: 'Draw' }], ...selection }, response: null }).request.tools, 'None');
   }
+});
+
+test('pending state is UI state, never part of the outgoing request or a fake response', () => {
+  const request = { input: [{ role: 'user', content: 'Draw a blue circle' }], enabledTools: ['draw_svg'] };
+  const pending = simplifyApiEntry({ request, response: null, pending: true });
+  assert.deepEqual(pending, { request: { text: 'Draw a blue circle', tools: 'draw_svg' }, response: null });
+  const completed = simplifyApiEntry({ request, response: { calls: [{ name: 'draw_svg' }] }, pending: false });
+  assert.deepEqual(completed.request, pending.request);
+  assert.deepEqual(completed.response, { call: 'draw_svg' });
 });

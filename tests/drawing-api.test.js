@@ -5,13 +5,25 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { drawingApi } from '../server/drawing-api.js';
+import { readDrawingResponse } from '../src/drawing-stream.js';
 
 async function serverFor(t, create, env = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'drawing-api-test-'));
   const handler = drawingApi({ OPENAI_API_KEY: 'test-only-placeholder', DRAW_LOG_DIR: directory, ...env }, { client: { responses: { create } } });
-  const server = createServer((req, res) => handler(req, res, () => { res.statusCode = 404; res.end(); }));
+  let requests = 0;
+  const server = createServer((req, res) => { requests++; return handler(req, res, () => { res.statusCode = 404; res.end(); }); });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  t.after(async () => { await new Promise(resolve => server.close(resolve)); await rm(directory, { recursive: true, force: true }); });
+  t.after(async () => {
+    await new Promise(resolve => server.close(resolve));
+    // Responses finish before their async metadata writes; do not delete the log directory early.
+    let records = 0;
+    for (let i = 0; i < 100 && records < requests; i++) {
+      try { records = (await readFile(join(directory, 'draw-api.jsonl'), 'utf8')).trim().split('\n').filter(Boolean).length; } catch {}
+      if (records < requests) await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    assert.equal(records, requests, 'every request persisted metadata before cleanup');
+    await rm(directory, { recursive: true, force: true });
+  });
   return { url: `http://127.0.0.1:${server.address().port}`, directory };
 }
 
@@ -32,7 +44,7 @@ test('live endpoint preserves model calls and records usage without content or s
   assert.equal(sent.store, false);
   assert.equal(sent.model, 'gpt-5.6-terra');
   assert.deepEqual(sent.reasoning, { effort: 'medium' });
-  assert.deepEqual(sent.tools.map(tool => tool.name), ['read_canvas', 'read_svg', 'create_svg', 'update_svg', 'draw_js', 'draw_svg', 'read_site_css', 'edit_site_css', 'replace_site_css', 'take_screenshot', 'reset_site_css']);
+  assert.deepEqual(sent.tools.map(tool => tool.name), ['draw_js', 'draw_svg', 'update_svg', 'read_site_css', 'edit_site_css', 'replace_site_css', 'reset_site_css']);
   assert.deepEqual(data.trace.request, sent);
   assert.equal(data.trace.response.id, 'response_1');
   assert.doesNotMatch(JSON.stringify(data.trace), /test-only-placeholder/);
@@ -78,11 +90,11 @@ test('tool selection reaches the provider, including zero tools, without accepti
     sent.push(request);
     return { id: 'tools_test', status: 'completed', output: [], output_text: 'Text only.' };
   });
-  for (const enabledTools of [[], ['draw_js'], ['read_canvas', 'draw_svg'], ['end_conversation']]) {
+  for (const enabledTools of [[], ['draw_js'], ['update_svg', 'draw_svg'], ['end_conversation']]) {
     const response = await fetch(`${url}/api/draw/turn`, { method: 'POST', body: JSON.stringify({ enabledTools, input: [{ role: 'user', content: 'Draw a city' }] }) });
     assert.equal(response.status, 200);
     const body = await response.json();
-    assert.deepEqual(body.trace.request.tools.map(tool => tool.name), enabledTools.filter(name => name !== 'end_conversation'));
+    assert.deepEqual(body.trace.request.tools.map(tool => tool.name).sort(), enabledTools.filter(name => name !== 'end_conversation').sort());
   }
   assert.match(sent[0].instructions, /No tools are available/);
   assert.doesNotMatch(sent[0].instructions, /Use create_svg/);
@@ -139,4 +151,74 @@ test('unconfigured key, malformed origin, and invalid input do not call the prov
   assert.equal((await fetch(`${noKey.url}/api/draw/status`).then(res => res.json())).configured, false);
   assert.equal((await fetch(`${noKey.url}/api/draw/turn`, { method: 'POST', body: '{}' })).status, 503);
   assert.equal(calls, 0);
+});
+
+test('streaming announces the tool before generation finishes and preserves full response context', { timeout: 5000 }, async t => {
+  let release, finished = false, requested;
+  const gate = new Promise(resolve => { release = resolve; });
+  t.after(() => release());
+  const call = { type: 'function_call', id: 'fc_stream', call_id: 'stream_1', name: 'draw_svg', arguments: '{"svg":"<svg/>"}', status: 'completed' };
+  const final = { id: 'response_stream', status: 'completed', output: [call], usage: { total_tokens: 200 } };
+  const { url } = await serverFor(t, request => {
+    requested = request;
+    return (async function* () {
+      yield { type: 'response.output_item.added', item: { ...call, arguments: '' } };
+      await gate;
+      finished = true;
+      yield { type: 'response.completed', response: final };
+    })();
+  });
+  const response = await fetch(`${url}/api/draw/turn`, { method: 'POST', headers: { Accept: 'application/x-ndjson' }, body: JSON.stringify({ input: [{ role: 'user', content: 'Draw' }], enabledTools: ['draw_svg'] }) });
+  let progress = 0, sentRequest = false;
+  const data = await readDrawingResponse(response, event => {
+    assert.equal(finished, false);
+    if (event.type === 'request.sent') {
+      assert.deepEqual(event.request, requested);
+      assert.equal(event.request.input[0].content, 'Draw');
+      assert.deepEqual(event.request.tools.map(tool => tool.name), ['draw_svg']);
+      sentRequest = true;
+      return;
+    }
+    assert.equal(sentRequest, true);
+    assert.deepEqual(event, { type: 'tool.started', call: { call_id: 'stream_1', name: 'draw_svg' } });
+    progress++; release();
+  });
+  assert.equal(progress, 1);
+  assert.equal(requested.stream, true);
+  assert.deepEqual(data.trace.response, final);
+  assert.deepEqual(data.trace.request, requested);
+  assert.equal(data.inputItems[0].arguments, call.arguments);
+});
+
+test('stream failures remain errors after HTTP headers and persist an error outcome', async t => {
+  const { url, directory } = await serverFor(t, () => (async function* () {
+    yield { type: 'response.output_item.added', item: { type: 'function_call', name: 'draw_svg', call_id: 'broken' } };
+    throw new Error('private upstream failure');
+  })());
+  const response = await fetch(`${url}/api/draw/turn`, { method: 'POST', headers: { Accept: 'application/x-ndjson' }, body: JSON.stringify({ input: [{ role: 'user', content: 'Draw' }] }) });
+  await assert.rejects(readDrawingResponse(response), /model request failed/);
+  let log;
+  for (let i = 0; i < 30; i++) {
+    try { log = JSON.parse((await readFile(join(directory, 'draw-api.jsonl'), 'utf8')).trim()); break; } catch {}
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  assert.equal(log.status, 502);
+  assert.equal(log.outcome, 'error');
+  assert.doesNotMatch(JSON.stringify(log), /private upstream failure/);
+});
+
+test('disconnecting the client aborts the provider stream', { timeout: 5000 }, async t => {
+  let aborted;
+  const cancellation = new Promise(resolve => { aborted = resolve; });
+  const { url } = await serverFor(t, (_request, { signal }) => (async function* () {
+    yield { type: 'response.output_item.added', item: { type: 'function_call', name: 'draw_svg', call_id: 'cancel' } };
+    await new Promise(resolve => { signal.addEventListener('abort', () => { aborted(); resolve(); }, { once: true }); });
+    throw new Error('cancelled');
+  })());
+  const control = new AbortController();
+  const response = await fetch(`${url}/api/draw/turn`, { method: 'POST', signal: control.signal, headers: { Accept: 'application/x-ndjson' }, body: JSON.stringify({ input: [{ role: 'user', content: 'Draw' }] }) });
+  const reader = response.body.getReader();
+  await reader.read(); control.abort();
+  await cancellation;
+  await reader.cancel().catch(() => {});
 });

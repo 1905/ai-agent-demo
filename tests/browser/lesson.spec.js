@@ -1,8 +1,14 @@
 import { test, expect } from '@playwright/test';
 import { weatherToolResult } from '../../src/lesson.js';
 
-const stages = ['text', 'define', 'tool-call', 'execute', 'weather', 'weather-call', 'weather-run', 'weather-result', 'answer'];
-const go = (page, stage) => page.locator(`[data-page="${stages.indexOf(stage)}"]`).click();
+const stages = ['intro', 'history-chat', 'history-web', 'history-tools', 'history-api', 'text', 'define', 'tool-call', 'execute', 'weather', 'weather-call', 'weather-run', 'weather-result', 'answer'];
+const go = async (page, stage) => {
+  if (await page.locator('.lesson-stage.intro').count()) {
+    if (stage === 'intro') return;
+    await page.locator('#next').click();
+  }
+  await page.locator(`[data-page="${stages.indexOf(stage)}"]`).click();
+};
 const noExtraControls = '#execute-tool, #send-context, #replay-exchange, #download, #sources';
 
 test.beforeEach(async ({ page }) => {
@@ -18,19 +24,31 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test('nine-step lesson progresses from a command to weather data with Next alone', async ({ page }) => {
+test('opening, four history slides, and nine-step lesson progress with Next alone', async ({ page }) => {
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.goto('/');
-  await expect(page.locator('[data-page]')).toHaveCount(9);
+  await expect(page.locator('[data-page], header, .settings-button, .reading-progress, #back')).toHaveCount(0);
+  await expect(page.locator('button:visible, a:visible')).toHaveCount(1);
   await expect(page.locator('html')).toHaveAttribute('lang', 'ru');
-  await expect(page.locator('.chat-reply')).toHaveAttribute('aria-hidden', 'false');
-  await expect(page.locator('.chat-reply')).toContainText('Красный.');
+  await expect(page.locator('.lesson-overview li')).toHaveCount(3);
+  await expect(page.locator('#next')).toContainText('Начать');
   for (const [index, stage] of stages.entries()) {
     if (index) await page.locator('#next').click();
     await expect(page.locator(`.lesson-stage.${stage}`)).toBeVisible();
+    if (stage !== 'intro') await expect(page.locator('[data-page]')).toHaveCount(14);
+    await expect(page.locator('header, .settings-button')).toHaveCount(0);
     await expect(page.locator(noExtraControls)).toHaveCount(0);
     await expect(page.locator('.lesson-stage .model-orb, .lesson-chat-model')).toHaveCount(0);
+    if (stage.startsWith('history-')) {
+      await expect(page.locator('.history-date')).toBeVisible();
+      await expect(page.locator('.history-visual')).toHaveAttribute('data-phase', '3');
+      if (stage === 'history-tools') await expect(page.locator('[data-calculation]')).toHaveText(/9\s386/);
+    }
+    if (stage === 'text') {
+      await expect(page.locator('.chat-reply')).toHaveAttribute('aria-hidden', 'false');
+      await expect(page.locator('.chat-reply')).toContainText('Красный.');
+    }
     if (['define', 'weather'].includes(stage)) {
       await expect(page.locator('.lesson-chat-message')).toHaveAttribute('data-speaker', 'user');
       await expect(page.locator('.lesson-available-tool')).toContainText(stage === 'define' ? 'draw_circle' : 'get_weather');
@@ -59,16 +77,18 @@ test('nine-step lesson progresses from a command to weather data with Next alone
     if (stage === 'answer') {
       await expect(page.locator('.chat-reply')).toHaveAttribute('aria-hidden', 'false');
       await expect(page.locator('.chat-reply')).toContainText('Да, возьмите зонт. В Москве дождь, +12 °C.');
-      await expect(page.locator('#next')).toContainText('Сначала');
+      await expect(page.locator('#next')).toContainText('В лабораторию');
     }
   }
   await page.locator('#next').click();
-  await expect(page.locator('.lesson-stage.text')).toBeVisible();
+  await expect(page).toHaveURL(/#draw$/);
+  await expect(page.locator('.workspace-header .brand')).toBeVisible();
+  await expect(page.locator('.settings-button')).toBeVisible();
   expect(errors).toEqual([]);
 });
 
 for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 844 }, { width: 320, height: 844 }]) {
-  test(`all nine stages fit ${viewport.width} × ${viewport.height}`, async ({ page }) => {
+  test(`all fourteen stages fit ${viewport.width} × ${viewport.height}`, async ({ page }) => {
     await page.setViewportSize(viewport);
     await page.goto('/');
     for (const stage of stages) {
@@ -88,6 +108,7 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 844 
 
 test('More shows highlighted teaching JSON with complete weather history', async ({ page }) => {
   await page.goto('/');
+  await go(page, 'text');
   await page.locator('[data-details="text"]').click();
   expect(Object.keys(JSON.parse(await page.locator('#request-detail code').innerText()))).toEqual(['текст']);
   await expect(page.locator('#request-detail')).toContainText('не формат API');
@@ -124,7 +145,8 @@ test('navigation cancels pending auto animations and Chat remains accessible', a
   await expect(page.locator('.lesson-stage.tool-call')).toBeVisible();
   await page.keyboard.press('ArrowLeft');
   await expect(page.locator('.lesson-stage.define')).toBeVisible();
-  await page.locator('.lesson-draw-link').click();
+  await go(page, 'answer');
+  await page.locator('#next').click();
   await expect(page.locator('h1')).toHaveText('Draw');
   await expect(page.locator('html')).toHaveAttribute('lang', 'en');
   expect(errors).toEqual([]);

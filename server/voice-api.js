@@ -137,7 +137,8 @@ export function attachVoiceApi(server, env, options = {}) {
         upstreamSend({ type: 'response.item.create', item: { type: 'function_call_output', call_id: event.call_id, output: event.output } });
         pending.delete(event.call_id); completed.add(event.call_id);
         persist({ id, session_id: sessionId, method: 'WS', event: 'tool.completed', tool: call.name, call_id: event.call_id, outcome: event.failed ? 'error' : 'success', duration_ms: Date.now() - call.started });
-        if (!pending.size) upstreamSend({ type: 'response.create' });
+        // A broken generated scene is retried only after the user speaks again.
+        if (!pending.size && !(call.name === 'draw_js' && event.failed)) upstreamSend({ type: 'response.create' });
         if (call.name === 'end_conversation') { send({ type: 'voice.ending' }); close(); }
       }
       // The client selects tool names; schemas and instructions stay server-owned.

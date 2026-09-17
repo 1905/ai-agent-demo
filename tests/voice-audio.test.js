@@ -51,10 +51,10 @@ test('mic mute sends silence while playback and tool calls keep working', async 
   voice.processor.onaudioprocess(frame);
   assert.equal(sent.at(-1).audio, 'AAAAAA==', 'buffered speech is replaced by silence');
   voice.receive({ type: 'session.output_audio.delta', delta: 'AAAAAA==' }, voice.generation);
-  voice.receive({ type: 'response.event', event: { type: 'response.output_item.done', item: { type: 'function_call', name: 'read_canvas', call_id: 'muted-tool', arguments: '{}' } } }, voice.generation);
+  voice.receive({ type: 'response.event', event: { type: 'response.output_item.done', item: { type: 'function_call', name: 'draw_svg', call_id: 'muted-tool', arguments: '{}' } } }, voice.generation);
   await voice.toolQueue;
   assert.equal(playback.length, 1);
-  assert.deepEqual(tools, ['read_canvas']);
+  assert.deepEqual(tools, ['draw_svg']);
   assert.equal(sent.at(-1).type, 'tool.result');
   assert.equal(voice.state, 'listening');
   voice.setMicMuted(false);
