@@ -21,14 +21,21 @@ function encodeAudio(pcm) {
 }
 
 export class VoiceSession {
-  constructor({ executeTool, onState, onTranscript, onError, onEvent, onLevel }) {
-    Object.assign(this, { executeTool, onState, onTranscript, onError, onEvent, onLevel });
-    this.state = 'idle'; this.generation = 0; this.calls = new Set(); this.toolQueue = Promise.resolve();
+  constructor({ model, executeTool, onState, onTranscript, onError, onEvent, onLevel }) {
+    Object.assign(this, { model, executeTool, onState, onTranscript, onError, onEvent, onLevel });
+    this.state = 'idle'; this.micMuted = false; this.generation = 0; this.calls = new Set(); this.toolQueue = Promise.resolve();
   }
   setState(state) { this.state = state; this.onState(state); }
+  setMicMuted(muted) {
+    if (this.state !== 'listening') return;
+    this.micMuted = Boolean(muted);
+    this.stream?.getAudioTracks().forEach(track => { track.enabled = !this.micMuted; });
+    if (this.micMuted) this.onLevel(0);
+  }
   send(event) { if (this.socket?.readyState === WebSocket.OPEN) this.socket.send(JSON.stringify(event)); }
   async start() {
     if (this.state !== 'idle') return;
+    this.micMuted = false;
     const generation = ++this.generation;
     this.abort = new AbortController(); this.calls.clear(); this.toolQueue = Promise.resolve();
     this.setState('connecting');
@@ -50,7 +57,7 @@ export class VoiceSession {
       stream.getAudioTracks()[0].onended = () => this.fail(new Error('The microphone disconnected. Connect it and start again.'));
       const url = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/api/voice`;
       const socket = this.socket = new WebSocket(url);
-      socket.onopen = () => this.send({ type: 'session.start' });
+      socket.onopen = () => this.send({ type: 'session.start', model: this.model });
       socket.onmessage = message => { if (generation === this.generation) this.receive(JSON.parse(message.data), generation); };
       socket.onerror = () => { if (generation === this.generation) this.fail(new Error('The voice connection failed. Try again.')); };
       socket.onclose = () => {
@@ -77,7 +84,10 @@ export class VoiceSession {
       this.processor = this.input.createScriptProcessor(2048, 1, 1);
       this.processor.onaudioprocess = e => {
         if (this.state !== 'listening') return;
-        const samples = e.inputBuffer.getChannelData(0);
+        const input = e.inputBuffer.getChannelData(0);
+        // Keep silence flowing so speech detection can finish the last utterance.
+        // Never forward buffered microphone samples after the user mutes.
+        const samples = this.micMuted ? new Float32Array(input.length) : input;
         this.onLevel(Math.min(1, Math.sqrt(samples.reduce((sum, value) => sum + value * value, 0) / samples.length) * 5));
         if (this.socket.bufferedAmount > 500000) return this.fail(new Error('Voice connection is too slow. Start again.'));
         this.send({ type: 'session.input_audio.append', audio: encodeAudio(pcm16(samples, this.input.sampleRate)) });

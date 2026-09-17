@@ -32,8 +32,8 @@ export function logVoiceEvent(direction, event) {
   selected = entries.length - 1; side = direction; paint();
 }
 
-export async function requestDrawing(input, signal) {
-  const entry = { request: structuredClone({ input }), response: null, endpoint: '/api/draw/turn', status: null };
+export async function requestDrawing(input, signal, model) {
+  const entry = { request: structuredClone({ input, model }), response: null, endpoint: '/api/draw/turn', status: null };
   entries.push(entry); selected = entries.length - 1; paint();
   const started = performance.now();
   try {

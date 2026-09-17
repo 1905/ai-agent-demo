@@ -2,20 +2,21 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { appendFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { drawingTools } from '../src/drawing-tools.js';
+import { agentTools } from '../src/agent-tools.js';
 import { drawingInstructions } from './drawing-api.js';
+import { DEFAULT_THINKING_MODEL, validThinkingModel } from '../src/thinking-models.js';
 
 // Adapted from voice_chat_mcp: Live speech + Responses delegation.
 const endTool = { type: 'function', name: 'end_conversation', description: 'End the voice session when the user says goodbye or asks to stop talking.', strict: true, parameters: { type: 'object', properties: {}, required: [], additionalProperties: false } };
-export function voiceSessionConfig(env) {
+export function voiceSessionConfig(env, model) {
   return {
     model: 'gpt-live-1', store: false,
-    instructions: 'You are a concise English-speaking drawing assistant. Delegate every drawing request, canvas question, and correction to the backend, which can inspect and change the canvas. Only confirm changes after tool results. Speak briefly. When the user says goodbye or asks to stop, delegate to end_conversation.',
+    instructions: 'You are a concise English-speaking drawing and site-theme assistant. Delegate every drawing request, canvas question, correction, theme change, font change, screenshot request, and theme reset to the backend. It can inspect and edit both the canvas and the entire site CSS. Only confirm changes after tool results. Speak briefly. When the user says goodbye or asks to stop, delegate to end_conversation.',
     audio: { format: { type: 'audio/pcm', rate: 24000 }, output: { voice: 'marin' } },
     delegation: { type: 'responses', responses: {
-      model: env.OPENAI_VOICE_DRAW_MODEL || 'gpt-5.6-terra',
+      model: model ?? env.OPENAI_VOICE_DRAW_MODEL ?? DEFAULT_THINKING_MODEL,
       instructions: `${drawingInstructions}\nYou receive spoken requests. Act on them using tools and report the verified result briefly. If the user asks to stop the conversation, call end_conversation.`,
-      tools: [...drawingTools, endTool], tool_choice: 'auto', parallel_tool_calls: false, max_output_tokens: 2000,
+      tools: [...agentTools, endTool], tool_choice: 'auto', parallel_tool_calls: false, max_output_tokens: 16000,
     } },
   };
 }
@@ -83,6 +84,8 @@ export function attachVoiceApi(server, env, options = {}) {
       let event;
       try { event = JSON.parse(bytes.toString()); } catch { return fail('Invalid voice event.'); }
       if (event.type === 'session.start' && !upstream) {
+        if (event.model !== undefined && !validThinkingModel(event.model)) return fail('Choose a thinking model from Settings.');
+        config.delegation.responses.model = voiceSessionConfig(env, event.model).delegation.responses.model;
         upstream = new WebSocket(options.upstreamUrl || 'wss://api.openai.com/v1/live/sessions', { headers: { Authorization: `Bearer ${env.OPENAI_API_KEY}` }, handshakeTimeout: timeoutMs, maxPayload: 5_000_000 });
         upstream.on('open', () => {
           if (finished) return upstream.close();
@@ -132,7 +135,8 @@ export function attachVoiceApi(server, env, options = {}) {
         if (!pending.size) upstreamSend({ type: 'response.create' });
         if (call.name === 'end_conversation') { send({ type: 'voice.ending' }); close(); }
       }
-      // Ignore client model/prompt/tool overrides. Session configuration is server-owned.
+      // Only the allowlisted thinking model is selectable at session start.
+      // Speech model, instructions, and tools remain server-owned.
     });
     client.on('close', close);
     client.on('error', close);

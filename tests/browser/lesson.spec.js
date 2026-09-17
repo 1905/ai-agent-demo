@@ -13,7 +13,7 @@ test('tool calling carries explicit context into a new request and produces a te
   expect(await page.evaluate(() => getComputedStyle(document.documentElement).backgroundColor)).toBe('rgb(12, 13, 15)');
 
   await advance(page);
-  await expect(page.locator('.response')).toContainText('movie night');
+  await expect(page.locator('.response')).toContainText('Red.');
   await advance(page);
   for (let i = 0; i < 4; i++) {
     await page.locator(`[data-year="${i}"]`).click();
@@ -22,41 +22,40 @@ test('tool calling carries explicit context into a new request and produces a te
   await page.locator('[data-year="0"]').focus();
   await page.keyboard.press('ArrowRight');
   await expect(page.locator('[data-year="1"]')).toBeFocused();
-  await expect(page.locator('.scene.history')).toBeVisible();
+  await expect(page.locator('.lesson-stage.history')).toBeVisible();
 
   await advance(page);
-  await expect(page.locator('.request-lane')).toContainText('Plan a movie night');
+  await expect(page.locator('.request-lane')).toContainText('Suggest a color for a circle');
   await expect(page.locator('.response-lane')).toBeVisible({ timeout: 5000 });
-  await expect(page.locator('.response-lane')).toContainText('Let’s pick a film');
+  await expect(page.locator('.response-lane')).toContainText('Red.');
   await page.locator('#replay-exchange').click();
   await expect(page.locator('.response-lane')).toBeHidden();
   await expect(page.locator('.response-lane')).toBeVisible({ timeout: 5000 });
 
   await advance(page);
-  await expect(page.locator('.scene.define')).toContainText('get_weather');
-  await expect(page.locator('.scene.define')).toContainText(/request/i);
+  await expect(page.locator('.lesson-stage.define')).toContainText('create_svg');
+  await expect(page.locator('.lesson-stage.define')).toContainText(/request/i);
   await advance(page);
-  await expect(page.locator('.scene.tool-call')).toContainText(/tool call/i);
-  await expect(page.locator('.tool-call-card')).toContainText('get_weather');
-  await expect(page.locator('.tool-call-card')).toContainText('Portland');
+  await expect(page.locator('.lesson-stage.tool-call')).toContainText(/tool call/i);
+  await expect(page.locator('.tool-call-card')).toContainText('create_svg');
+  await expect(page.locator('.tool-call-card')).toContainText('Circle');
 
   await advance(page);
-  await expect(page.locator('.scene.execute')).toContainText(/your code/i);
-  await expect(page.locator('.scene.execute')).toContainText(/weather/i);
+  await expect(page.locator('.lesson-stage.execute')).toContainText(/your code/i);
+  await expect(page.locator('.lesson-stage.execute')).toContainText(/create_svg/i);
   await expect(page.locator('.tool-observation')).not.toBeVisible();
-  await page.locator('[data-weather="clear"]').click();
-  await expect(page.locator('[data-weather="clear"]')).toBeFocused();
+  await expect(page.locator('.lesson-canvas circle')).toHaveCount(0);
   await page.locator('#execute-tool').click();
   await expect(page.locator('.tool-observation')).toBeVisible();
-  await expect(page.locator('.tool-observation')).toContainText(/clear|22/);
+  await expect(page.locator('.tool-observation')).toContainText(/shape-1 created/);
 
   await advance(page);
   const context = page.locator('.context-row');
   await expect(context).toHaveCount(4);
   await expect(context.nth(0)).toContainText(/tool|instruction|system/i);
-  await expect(context.nth(1)).toContainText(/user|movie|Portland/i);
-  await expect(context.nth(2)).toContainText(/get_weather|tool call/i);
-  await expect(context.nth(3)).toContainText(/clear|22/);
+  await expect(context.nth(1)).toContainText(/user|circle/i);
+  await expect(context.nth(2)).toContainText(/create_svg|tool call/i);
+  await expect(context.nth(3)).toContainText(/shape-1 created/);
   const carriedContext = await context.allTextContents();
 
   await advance(page);
@@ -67,14 +66,16 @@ test('tool calling carries explicit context into a new request and produces a te
   await expect(page.locator('.context-received')).toBeVisible({ timeout: 5000 });
 
   await advance(page);
-  await expect(page.locator('.scene.answer .response-lane')).toBeVisible({ timeout: 5000 });
-  await expect(page.locator('.scene.answer .response-lane')).toContainText(/outside|outdoor/i);
-  await expect(page.locator('.scene.answer')).toContainText(/text/i);
+  await expect(page.locator('.lesson-stage.answer .response-lane')).toBeVisible({ timeout: 5000 });
+  await expect(page.locator('.lesson-stage.answer .response-lane')).toContainText(/Drew a red circle/);
+  await expect(page.locator('.lesson-stage.answer')).toContainText(/text/i);
 
   await advance(page);
   await page.locator('#run-loop').click();
   await expect(page.locator('.loop-output')).toContainText('New API call', { timeout: 10000 });
   await expect(page.locator('.loop-step.done')).toHaveCount(3);
+  await expect(page.locator('.lesson-canvas circle')).toHaveAttribute('fill', '#5689f5');
+  await expect(page.locator('.lesson-canvas circle')).toHaveAttribute('data-shape-id', 'shape-1');
 
   await advance(page);
   await expect(page.locator('h1')).toHaveText('That’s how an agent works.');
@@ -94,9 +95,9 @@ test('every slide fits a 1280 by 720 presentation viewport', async ({ page }) =>
   await page.setViewportSize({ width: 1280, height: 720 });
   await page.goto('/');
   for (const [index, stage] of stages.entries()) {
-    await expect(page.locator(`.scene.${stage}`)).toBeVisible();
+    await expect(page.locator(`.lesson-stage.${stage}`)).toBeVisible();
     await expect(page.locator('h1')).toBeInViewport({ ratio: 1 });
-    await expect(page.locator('.scene')).toBeInViewport({ ratio: 1 });
+    await expect(page.locator('.lesson-stage')).toBeInViewport({ ratio: 1 });
     await expect(page.locator('#next')).toBeInViewport({ ratio: 1 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(1280);
     if (stage === 'api') {
@@ -114,7 +115,7 @@ test('mobile has no raw JSON or horizontal overflow and every step remains navig
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/');
   for (const [index, stage] of stages.entries()) {
-    await expect(page.locator(`.scene.${stage}`)).toBeVisible();
+    await expect(page.locator(`.lesson-stage.${stage}`)).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
     await expect(page.locator('pre, #show-json, .eyebrow, .optional')).toHaveCount(0);
     expect(await page.locator('main').innerText()).not.toMatch(/"(?:messages|arguments|function|role|type)"\s*:/);
@@ -124,22 +125,22 @@ test('mobile has no raw JSON or horizontal overflow and every step remains navig
   }
 });
 
-test('rain informs the answer and keyboard navigation cancels an active loop', async ({ page }) => {
+test('drawing results inform the answer and keyboard navigation cancels an active loop', async ({ page }) => {
   await page.goto('/');
   await advance(page, 6);
   await page.locator('#execute-tool').click();
-  await expect(page.locator('.tool-observation')).toContainText(/rain|14/i);
+  await expect(page.locator('.tool-observation')).toContainText(/shape-1 created/);
   await advance(page, 3);
   await expect(page.locator('.response-lane')).toBeVisible({ timeout: 5000 });
-  await expect(page.locator('.response-lane')).toContainText(/inside|indoor/i);
+  await expect(page.locator('.response-lane')).toContainText(/Drew a red circle/);
 
   await advance(page);
   await page.locator('#run-loop').click();
   await page.keyboard.press('ArrowRight');
   await page.waitForTimeout(1900);
-  await expect(page.locator('.scene.end')).toBeVisible();
+  await expect(page.locator('.lesson-stage.end')).toBeVisible();
   await page.keyboard.press('ArrowLeft');
-  await expect(page.locator('.scene.loop')).toBeVisible();
+  await expect(page.locator('.lesson-stage.loop')).toBeVisible();
   await expect(page.locator('.loop-step.done')).toHaveCount(0);
   await expect(page.locator('#run-loop')).toBeEnabled();
 });
@@ -152,9 +153,9 @@ test('leaving a new request cancels its pending animation', async ({ page }) => 
   await page.locator('#send-context').click();
   await advance(page);
   await page.waitForTimeout(2200);
-  await expect(page.locator('.scene.answer')).toBeVisible();
+  await expect(page.locator('.lesson-stage.answer')).toBeVisible();
   await page.keyboard.press('ArrowLeft');
-  await expect(page.locator('.scene.new-call')).toBeVisible();
+  await expect(page.locator('.lesson-stage.new-call')).toBeVisible();
   await expect(page.locator('.context-received')).not.toBeVisible();
   await expect(page.locator('#send-context')).toBeEnabled();
   expect(errors).toEqual([]);

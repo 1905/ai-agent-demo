@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { WebSocket, WebSocketServer } from 'ws';
 import { attachVoiceApi, voiceSessionConfig } from '../server/voice-api.js';
-import { drawingTools } from '../src/drawing-tools.js';
+import { agentTools } from '../src/agent-tools.js';
 
 async function until(check) {
   const deadline = Date.now() + 2500;
@@ -45,7 +45,7 @@ async function setup(t, provider, env = {}) {
 const send = (socket, value) => socket.send(JSON.stringify(value));
 const startProvider = socket => send(socket, { type: 'session.started', session: { id: 'live_test' } });
 
-test('voice uses fixed server models and the same SVG tools; image outputs continue the delegation', async t => {
+test('voice defaults to Terra with server-owned speech and tools; image outputs continue the delegation', async t => {
   const { client, sent, received, directory } = await setup(t, (socket, event) => {
     if (event.type === 'session.start') startProvider(socket);
     if (event.type === 'session.input_audio.append') {
@@ -59,7 +59,8 @@ test('voice uses fixed server models and the same SVG tools; image outputs conti
   await until(() => received.find(event => event.type === 'session.started'));
   const configuration = sent.find(event => event.type === 'session.start').session;
   assert.deepEqual(configuration, voiceSessionConfig({}));
-  assert.deepEqual(configuration.delegation.responses.tools.slice(0, -1), drawingTools);
+  assert.equal(configuration.delegation.responses.model, 'gpt-5.6-terra');
+  assert.deepEqual(configuration.delegation.responses.tools.slice(0, -1), agentTools);
   assert.equal(configuration.delegation.responses.parallel_tool_calls, false);
   send(client, { type: 'session.update', session: { delegation: { responses: { model: 'override' } } } });
   send(client, { type: 'session.input_audio.append', audio: 'AAAA' });
@@ -85,7 +86,33 @@ test('voice uses fixed server models and the same SVG tools; image outputs conti
   }
   assert.equal(records.find(record => record.event === 'session.finished').usage.seconds, 3);
   assert.equal(records.find(record => record.event === 'response.completed').usage.total_tokens, 42);
+  assert.equal(records.find(record => record.event === 'response.completed').model, 'gpt-5.6-terra');
   assert.equal(records.find(record => record.event === 'response.completed').cost_usd, null);
+});
+
+test('voice allows a thinking model choice only at session start', async t => {
+  const { client, sent, received } = await setup(t, (socket, event) => {
+    if (event.type === 'session.start') startProvider(socket);
+    if (event.type === 'session.close') send(socket, { type: 'session.closed' });
+  });
+  send(client, { type: 'session.start', model: 'gpt-6-astra', session: { model: 'override', instructions: 'override' } });
+  await until(() => received.find(event => event.type === 'session.started'));
+  const config = sent[0].session;
+  assert.equal(config.delegation.responses.model, 'gpt-6-astra');
+  assert.equal(config.model, 'gpt-live-1');
+  assert.deepEqual(config.delegation.responses.tools.slice(0, -1), agentTools);
+  send(client, { type: 'session.start', model: 'gpt-5.6-terra' });
+  send(client, { type: 'session.close' });
+  await until(() => received.find(event => event.type === 'voice.ended'));
+  assert.equal(sent.filter(event => event.type === 'session.start').length, 1);
+});
+
+test('invalid voice thinking model never opens a provider connection', async t => {
+  const { client, sent, received } = await setup(t, () => assert.fail('Provider must not receive a request'));
+  send(client, { type: 'session.start', model: 'not-allowed' });
+  await until(() => received.find(event => event.type === 'voice.ended'));
+  assert.match(received.find(event => event.type === 'error').error.message, /Settings/);
+  assert.equal(sent.length, 0);
 });
 
 test('stop waits for final usage but closes on a provider timeout', async t => {

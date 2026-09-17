@@ -1,13 +1,17 @@
-import './drawer.css';
 import { createDrawingStore, shapeMarkup, exportDrawing, COLORS, MAX_MODEL_CALLS } from './drawing-tools.js';
 import { captureCanvas, toolOutput } from './drawing-canvas.js';
 import { planDemo } from './drawing-demo.js';
 import { mountApiLog, resetApiLog, requestDrawing, logVoiceEvent } from './drawing-log.js';
 import { VoiceSession } from './voice/session.js';
+import { mountVoiceBubble } from './voice/bubble.js';
+import { themeTools } from './theme-tools.js';
+import { executeThemeTool, bindThemeControls } from './site-theme.js';
+import { getThinkingModel, settingsButton, mountSettings } from './settings.js';
 
 const store = createDrawingStore();
 const escape = value => String(value).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const arrow = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M5 12h14m-6-6 6 6-6 6"/></svg>';
+const micIcon = muted => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3m-3 0h6"/>${muted ? '<path d="m3 3 18 18"/>' : ''}</svg>`;
 let root, busy = false, session = 0, controller, mode = 'live', liveAvailable = false, checkingApi = true;
 let transcript = [], messages = [], events = [], requestCount = 0, nextCall = 0;
 let voiceView = false, voiceSession;
@@ -18,14 +22,18 @@ const find = selector => root?.querySelector(selector);
 const durationText = ms => ms < 1 ? '<1 ms' : ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`;
 function resultText(result) {
   if (result.error) return result.error;
+  if (result.view && result.imageUrl) return 'Page screenshot captured.';
+  if (result.action === 'theme_updated') return 'Theme updated.';
+  if (result.action === 'theme_reset') return 'Original theme restored.';
+  if (result.css) return 'Site stylesheet read.';
   if (result.imageUrl) return `Canvas checked. ${result.shapes.length} ${result.shapes.length === 1 ? 'shape' : 'shapes'}.`;
   if (result.shapes) return result.shapes.length ? result.shapes.map(shape => `${shape.id} · ${colorName(shape.fill)} ${shape.shape}`).join(' / ') : 'Canvas is empty';
   return `${result.shape.id} ${result.action} · ${colorName(result.shape.fill)}`;
 }
 function paint() {
   if (!root?.isConnected) return;
-  find('#drawing-chat').innerHTML = messages.length ? messages.map(message => `<div class="draw-message ${message.role}"><span>${message.role === 'user' ? 'You' : 'Agent'}</span><p>${escape(message.text)}</p></div>`).join('') : '';
-  find('#drawing-calls').innerHTML = events.length ? events.map(event => `<article class="draw-tool ${escape(event.name)} ${event.status}" data-call-id="${escape(event.id)}"${event.status === 'error' ? ' aria-label="Tool failed"' : ''}><h3>${escape(event.name)}</h3><span class="draw-tool-duration" title="Tool execution time">${event.status === 'running' ? '…' : escape(durationText(event.durationMs))}</span></article>`).join('') : '';
+  find('#drawing-chat').innerHTML = messages.length ? messages.map(message => `<div class="chat-message ${message.role}"><span>${message.role === 'user' ? 'You' : 'Agent'}</span><p>${escape(message.text)}</p></div>`).join('') : '';
+  find('#drawing-calls').innerHTML = events.length ? events.map(event => `<article class="tool-entry ${escape(event.name)} ${event.status}" data-call-id="${escape(event.id)}"${event.status === 'error' ? ' aria-label="Tool failed"' : ''}><h3>${escape(event.name)}</h3><span class="tool-duration" title="Tool execution time">${event.status === 'running' ? '…' : escape(durationText(event.durationMs))}</span></article>`).join('') : '';
   const snapshot = store.read();
   // Preserve SVG nodes so changing a fill visibly updates the same circle.
   const layer = find('#shape-layer');
@@ -40,17 +48,24 @@ function paint() {
     }
   }
   find('#draw-export').disabled = snapshot.shapes.length === 0;
-  const unavailable = mode === 'live' && (!liveAvailable || checkingApi);
+  const unavailable = (voiceView || mode === 'live') && (!liveAvailable || checkingApi);
   find('#draw-send').disabled = busy || unavailable;
   find('#draw-prompt').disabled = busy;
   find('#draw-mode').disabled = busy;
   find('#draw-status').textContent = voiceView ? '' : busy ? 'Working…' : mode === 'demo' ? 'Demo · no LLM calls' : checkingApi ? 'Connecting to API…' : !liveAvailable ? 'Live · API unavailable' : `Live · ${requestCount} API ${requestCount === 1 ? 'call' : 'calls'}`;
   if (voiceView) {
     const state = voiceSession?.state || 'idle';
+    const mic = find('#voice-mic-toggle');
+    const muted = Boolean(voiceSession?.micMuted);
+    mic.hidden = state !== 'listening';
+    mic.disabled = state !== 'listening';
+    mic.setAttribute('aria-pressed', String(!muted));
+    mic.title = muted ? 'Turn microphone on' : 'Turn microphone off';
+    mic.innerHTML = micIcon(muted);
     find('#voice-button').disabled = unavailable || state === 'stopping';
     find('#voice-button').dataset.state = state;
     find('#voice-button').setAttribute('aria-label', state === 'idle' ? 'Start voice' : 'Stop voice');
-    find('#voice-state').textContent = { idle: 'Start voice', connecting: 'Connecting…', listening: 'Listening', stopping: 'Stopping…' }[state];
+    find('#voice-state').textContent = { idle: 'Start voice', connecting: 'Connecting…', listening: muted ? 'Mic off' : 'Listening', stopping: 'Stopping…' }[state];
   }
   for (const selector of ['#drawing-chat', '#drawing-calls']) { const pane = find(selector); pane.scrollTop = pane.scrollHeight; }
 }
@@ -64,14 +79,17 @@ async function execute(call, token) {
   if (invalidArgs) args = {};
   const event = { id: call.call_id || `demo-${++nextCall}`, name: call.name, args, status: 'running' };
   events.push(event); paint();
-  await sleep(mode === 'demo' ? 650 : 220);
+  await sleep(!voiceView && mode === 'demo' ? 650 : 220);
   if (token !== session) return null;
   // Measure execution only; the presentation delay is not tool work.
   const started = performance.now();
   try {
     if (invalidArgs) throw new Error('Tool arguments must be an object.');
-    event.result = store.execute(call.name, args);
-    if (call.name === 'read_canvas') event.result.imageUrl = await captureCanvas(event.result);
+    if (themeTools.some(tool => tool.name === call.name)) event.result = await executeThemeTool(call.name, args, () => token === session);
+    else {
+      event.result = store.execute(call.name, args);
+      if (call.name === 'read_canvas') event.result.imageUrl = await captureCanvas(event.result);
+    }
     event.status = 'done';
   }
   catch (error) { event.result = { error: error.message }; event.status = 'error'; }
@@ -86,6 +104,7 @@ async function submit(text) {
   if (mode === 'live' && (!liveAvailable || checkingApi)) { find('#draw-error').textContent = checkingApi ? 'The API connection is still loading.' : 'Live mode needs a configured server API key. Demo mode is available if selected.'; return; }
   if (text.length > 2000) { find('#draw-error').textContent = 'Keep the message under 2,000 characters.'; return; }
   const token = session;
+  const model = getThinkingModel();
   busy = true; find('#draw-error').textContent = ''; find('#draw-prompt').value = '';
   messages.push({ role: 'user', text }); paint();
   try {
@@ -111,7 +130,7 @@ async function submit(text) {
       for (let round = 0; round < MAX_MODEL_CALLS; round++) {
         controller = new AbortController();
         requestCount++; paint();
-        const data = await requestDrawing(transcript, controller.signal);
+        const data = await requestDrawing(transcript, controller.signal, model);
         if (token !== session) return;
         transcript.push(...data.inputItems);
         const calls = data.calls;
@@ -152,6 +171,7 @@ function toggleVoice() {
   let caption = '', speaker = '';
   const current = () => root === mounted && voiceSession === connection;
   const connection = new VoiceSession({
+    model: getThinkingModel(),
     executeTool: async call => {
       const token = session;
       const result = await execute(call, token);
@@ -179,19 +199,29 @@ function toggleVoice() {
 export function mountDrawer(container, options = {}) {
   root = container;
   voiceView = options.voice === true;
-  if (voiceView) mode = 'live';
   checkingApi = true;
-  root.innerHTML = `<header class="draw-header"><a href="#" class="brand"><span class="brand-mark"></span>agent lab</a><nav class="view-switch" aria-label="Views"><a href="#">Lesson</a><a href="#draw" ${voiceView ? '' : 'aria-current="page"'}>Chat</a><a href="#voice" ${voiceView ? 'aria-current="page"' : ''}>Voice</a></nav><select id="draw-mode" aria-label="Model mode" ${voiceView ? 'hidden' : ''}><option value="demo">Demo</option><option value="live" disabled>Live · key needed</option></select></header><main class="drawer-main"><div class="draw-intro"><h1>${voiceView ? 'Voice' : 'Draw'}</h1><button id="draw-reset" type="button">Reset</button></div><div class="drawer-grid"><section class="draw-chat-column" aria-labelledby="chat-title"><div class="draw-column-title"><h2 id="chat-title">${voiceView ? 'Voice' : 'Chat'}</h2>${arrow}</div><div id="drawing-chat" ${voiceView ? 'hidden' : ''} class="draw-scroll" role="log" aria-label="Conversation"></div>${voiceView ? `<div class="voice-panel"><button type="button" id="voice-button" aria-label="Start voice"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3m-3 0h6"/></svg></button><span id="voice-state" role="status">Start voice</span><p id="voice-caption" aria-live="polite"></p></div>` : ''}<form id="draw-form" ${voiceView ? 'hidden' : ''}><label class="sr-only" for="draw-prompt">Tell the agent what to draw</label><textarea id="draw-prompt" rows="2" maxlength="2000" placeholder="Draw a red circle…"></textarea><button id="draw-send" type="submit" aria-label="Send message">${arrow}</button></form><p id="draw-error" role="alert"></p></section><section class="draw-calls-column" aria-labelledby="calls-title"><div class="draw-column-title"><h2 id="calls-title">Tool calls</h2>${arrow}</div><div id="drawing-calls" class="draw-scroll" role="log" aria-label="Tool calls"></div><span id="draw-status" class="draw-status"></span></section><section class="draw-canvas-column" aria-labelledby="canvas-title"><div class="draw-column-title"><h2 id="canvas-title">Drawing</h2><button id="draw-export" type="button">Save SVG ↓</button></div><div class="drawing-square"><svg id="drawing-svg" viewBox="0 0 640 640" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Your SVG drawing"><g id="shape-layer"></g></svg></div></section></div><section id="api-log" class="api-log" aria-label="Raw API log"></section></main>`;
+  root.innerHTML = `<header class="workspace-header"><a href="#" class="brand"><span class="brand-mark"></span>agent lab</a><nav class="view-tabs" aria-label="Views"><a href="#">Lesson</a><a href="#draw" ${voiceView ? '' : 'aria-current="page"'}>Chat</a><a href="#voice" ${voiceView ? 'aria-current="page"' : ''}>Voice</a></nav><select id="draw-mode" aria-label="Model mode" ${voiceView ? 'hidden' : ''}><option value="demo">Demo</option><option value="live" disabled>Live · key needed</option></select></header><main class="workspace-page"><div class="workspace-heading"><h1>${voiceView ? 'Voice' : 'Draw'}</h1><div class="workspace-actions"><button class="theme-reset-button" type="button" data-reset-theme>Reset theme</button><button id="draw-reset" class="reset-canvas-button" type="button">Reset canvas</button></div></div><div class="workspace-columns"><section class="chat-panel" aria-labelledby="chat-title"><div class="panel-heading"><h2 id="chat-title">${voiceView ? 'Voice' : 'Chat'}</h2>${arrow}</div><div id="drawing-chat" ${voiceView ? 'hidden' : ''} class="panel-scroll" role="log" aria-label="Conversation"></div>${voiceView ? `<div class="voice-panel"><div id="voice-bubble" class="agent-voice"></div><div class="voice-controls"><button type="button" id="voice-button" class="voice-toggle" aria-label="Start voice"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3m-3 0h6"/></svg></button><span id="voice-state" role="status">Start voice</span></div><p id="voice-caption" class="voice-caption" aria-live="polite"></p></div>` : ''}<form id="draw-form" class="chat-form" ${voiceView ? 'hidden' : ''}><label class="sr-only" for="draw-prompt">Tell the agent what to draw</label><textarea id="draw-prompt" class="chat-input" rows="2" maxlength="2000" placeholder="Draw a red circle…"></textarea><button id="draw-send" class="send-button" type="submit" aria-label="Send message">${arrow}</button></form><p id="draw-error" role="alert"></p></section><section class="tool-panel" aria-labelledby="calls-title"><div class="panel-heading"><h2 id="calls-title">Tool calls</h2>${arrow}</div><div id="drawing-calls" class="panel-scroll" role="log" aria-label="Tool calls"></div><span id="draw-status" class="workspace-status"></span></section><section class="canvas-panel" aria-labelledby="canvas-title"><div class="panel-heading"><h2 id="canvas-title">Drawing</h2><button id="draw-export" class="export-button" type="button">Save SVG ↓</button></div><div class="canvas-surface"><svg id="drawing-svg" viewBox="0 0 640 640" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Your SVG drawing"><g id="shape-layer"></g></svg></div></section></div><section id="api-log" class="api-log" aria-label="Raw API log"></section></main>`;
   mountApiLog(find('#api-log'));
+  find('.workspace-header').insertAdjacentHTML('beforeend', settingsButton);
+  if (voiceView) {
+    find('.settings-button').insertAdjacentHTML('beforebegin', `<button id="voice-mic-toggle" type="button" class="mic-toggle-button" aria-label="Microphone" aria-pressed="true" hidden disabled>${micIcon(false)}</button>`);
+    find('#voice-mic-toggle').onclick = () => {
+      voiceSession?.setMicMuted(!voiceSession.micMuted);
+      paint();
+    };
+  }
+  mountSettings(root);
+  bindThemeControls();
   find('#draw-form').onsubmit = event => { event.preventDefault(); submit(find('#draw-prompt').value); };
   find('#draw-prompt').onkeydown = event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); submit(event.currentTarget.value); } };
   find('#draw-reset').onclick = reset;
   if (voiceView) find('#voice-button').onclick = toggleVoice;
+  const unmountBubble = voiceView ? mountVoiceBubble(find('#voice-bubble'), () => voiceSession) : null;
   find('#draw-mode').onchange = event => { mode = event.target.value; reset(); };
   find('#draw-export').onclick = () => {
     const link = document.createElement('a'); link.href = URL.createObjectURL(new Blob([exportDrawing(store.read())], { type: 'image/svg+xml' })); link.download = 'agent-drawing.svg'; link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 1000);
   };
-  // Canvas belongs to the application and survives switching back to the lesson.
+  // Chat and Voice share this store. View changes preserve shapes and Chat's mode.
   find('#draw-mode').value = mode;
   paint();
   const panes = [find('#drawing-chat'), find('#drawing-calls')];
@@ -207,13 +237,13 @@ export function mountDrawer(container, options = {}) {
     liveAvailable = Boolean(status?.configured);
     const option = find('#draw-mode').querySelector('[value="live"]');
     option.disabled = !liveAvailable; option.textContent = liveAvailable ? 'Live' : 'Live · key needed';
-    if (mode === 'live' && !liveAvailable) find('#draw-error').textContent = 'Live mode needs OPENAI_API_KEY on the server. Configure it and restart the server.';
+    if ((voiceView || mode === 'live') && !liveAvailable) find('#draw-error').textContent = 'Live mode needs OPENAI_API_KEY on the server. Configure it and restart the server.';
     find('#draw-mode').value = mode; paint();
   }).catch(() => {
     if (find('#draw-mode') !== mounted) return;
     checkingApi = false; liveAvailable = false;
-    if (mode === 'live') find('#draw-error').textContent = 'The drawing API is unavailable. Start the project server and reload.';
+    if (voiceView || mode === 'live') find('#draw-error').textContent = 'The drawing API is unavailable. Start the project server and reload.';
     paint();
   });
-  return () => { voiceSession?.dispose(); voiceSession = null; session++; controller?.abort(); resizeObserver.disconnect(); busy = false; root = null; };
+  return () => { unmountBubble?.(); voiceSession?.dispose(); voiceSession = null; session++; controller?.abort(); resizeObserver.disconnect(); busy = false; root = null; };
 }

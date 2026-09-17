@@ -30,7 +30,8 @@ test('live endpoint preserves model calls and records usage without content or s
   assert.equal(data.inputItems[0].call_id, 'call_1');
   assert.deepEqual(sent.input, input);
   assert.equal(sent.store, false);
-  assert.deepEqual(sent.tools.map(tool => tool.name), ['read_canvas', 'read_svg', 'create_svg', 'update_svg']);
+  assert.equal(sent.model, 'gpt-5.6-terra');
+  assert.deepEqual(sent.tools.map(tool => tool.name), ['read_canvas', 'read_svg', 'create_svg', 'update_svg', 'read_site_css', 'edit_site_css', 'replace_site_css', 'take_screenshot', 'reset_site_css']);
   assert.deepEqual(data.trace.request, sent);
   assert.equal(data.trace.response.id, 'response_1');
   assert.doesNotMatch(JSON.stringify(data.trace), /test-only-placeholder/);
@@ -42,9 +43,26 @@ test('live endpoint preserves model calls and records usage without content or s
   const record = JSON.parse(log.trim());
   assert.equal(record.usage.total_tokens, 140);
   assert.equal(record.cost_usd, null);
+  assert.equal(record.model, 'gpt-5.6-terra');
   assert.equal(record.provider_response_id, 'response_1');
   assert.equal(typeof record.duration_ms, 'number');
   assert.doesNotMatch(log, /private drawing instruction|test-only-placeholder/);
+});
+
+test('thinking model selection reaches the provider and invalid choices are rejected', async t => {
+  const sent = [];
+  const { url } = await serverFor(t, async request => {
+    sent.push(request);
+    return { id: 'selection_test', status: 'completed', output: [], output_text: 'Done.' };
+  });
+  for (const model of ['gpt-6-astra', 'gpt-5.6-terra', 'not-allowed', null]) {
+    const response = await fetch(`${url}/api/draw/turn`, { method: 'POST', body: JSON.stringify({ model, input: [{ role: 'user', content: 'Draw' }] }) });
+    assert.equal(response.status, ['gpt-6-astra', 'gpt-5.6-terra'].includes(model) ? 200 : 400);
+  }
+  assert.deepEqual(sent.map(request => request.model), ['gpt-6-astra', 'gpt-5.6-terra']);
+  const status = await fetch(`${url}/api/draw/status`).then(response => response.json());
+  assert.equal(status.model, 'gpt-5.6-terra');
+  assert.equal(status.voiceModel, 'gpt-5.6-terra');
 });
 
 test('model message text is preserved without the SDK output_text convenience field', async t => {

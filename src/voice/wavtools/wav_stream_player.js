@@ -20,6 +20,7 @@ export class WavStreamPlayer {
     this.context = null;
     this.stream = null;
     this.analyser = null;
+    this.analysisBuffer = null;
     this.trackSampleOffsets = {};
     this.interruptedTrackIds = {};
     this.onError = onError;
@@ -35,9 +36,9 @@ export class WavStreamPlayer {
       if (this.context !== context || context.state === 'closed') throw new Error('Audio output was closed during startup.');
       await resumeAudioContext(context);
       const analyser = context.createAnalyser();
-      analyser.fftSize = 8192;
-      analyser.smoothingTimeConstant = 0.1;
+      analyser.fftSize = 512;
       this.analyser = analyser;
+      this.analysisBuffer = new Float32Array(analyser.fftSize);
       return true;
     } catch (e) {
       await this.close();
@@ -53,10 +54,21 @@ export class WavStreamPlayer {
     this.stream = null;
   }
 
+  // Read played samples, including silence during worklet buffering. This tap
+  // excludes microphone input and the connection chime and does not alter gain.
+  getPlaybackLevel() {
+    if (!this.stream || !this.analyser || this.context?.state !== 'running') return 0;
+    this.analyser.getFloatTimeDomainData(this.analysisBuffer);
+    let energy = 0;
+    for (const sample of this.analysisBuffer) energy += sample * sample;
+    return Math.sqrt(energy / this.analysisBuffer.length);
+  }
+
   async close() {
     this.stop();
     this.analyser?.disconnect();
     this.analyser = null;
+    this.analysisBuffer = null;
     const context = this.context;
     this.context = null;
     await closeAudioContext(context);
