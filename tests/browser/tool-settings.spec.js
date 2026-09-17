@@ -40,9 +40,14 @@ test('all eight switches are accessible, keyboard controlled and persistent', as
   await expect(page.locator('.tool-settings-button')).toBeFocused();
   await page.getByRole('link', { name: 'Voice', exact: true }).click();
   await open(page);
-  expect(await selected(page)).toEqual(['draw_svg']);
+  expect(await selected(page)).toHaveLength(8);
+  await page.locator('[data-tools="off"]').click();
   await page.keyboard.press('Escape');
   await page.reload();
+  await open(page);
+  expect(await selected(page)).toEqual([]);
+  await page.keyboard.press('Escape');
+  await page.getByRole('link', { name: 'Chat', exact: true }).click();
   await open(page);
   expect(await selected(page)).toEqual(['draw_svg']);
   await page.keyboard.press('Escape');

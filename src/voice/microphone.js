@@ -1,7 +1,17 @@
 export const DEFAULT_MIC_ID = 'default';
 export const MICROPHONE_TIMEOUT_MS = 15000;
+export const AUTO_MIC_ID = 'auto';
+let selectedMicrophoneId = AUTO_MIC_ID;
+try { if (typeof window !== 'undefined') selectedMicrophoneId = window.localStorage.getItem('agent-lab-microphone') || AUTO_MIC_ID; } catch { /* Storage may be disabled. */ }
 
-export function preferredMicrophoneId(devices) {
+export const getMicrophoneId = () => selectedMicrophoneId;
+export function setMicrophoneId(deviceId) {
+    selectedMicrophoneId = deviceId || AUTO_MIC_ID;
+    try { if (typeof window !== 'undefined') window.localStorage.setItem('agent-lab-microphone', selectedMicrophoneId); } catch { /* Keep the choice for this page. */ }
+}
+
+export function preferredMicrophoneId(devices, selection = getMicrophoneId()) {
+    if (selection !== AUTO_MIC_ID) return selection;
     return devices.find(device => device.kind === 'audioinput' && device.deviceId &&
         device.deviceId !== DEFAULT_MIC_ID && /airpods/i.test(device.label))?.deviceId || DEFAULT_MIC_ID;
 }

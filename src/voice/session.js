@@ -1,4 +1,4 @@
-import { openMicrophone, preferredMicrophoneId, microphoneErrorMessage, microphoneSupportError } from './microphone.js';
+import { openMicrophone, preferredMicrophoneId, getMicrophoneId, microphoneErrorMessage, microphoneSupportError } from './microphone.js';
 import { closeAudioContext, resumeAudioContext } from './audioContext.js';
 import { WavStreamPlayer } from './wavtools/wav_stream_player.js';
 
@@ -21,8 +21,8 @@ function encodeAudio(pcm) {
 }
 
 export class VoiceSession {
-  constructor({ model, reasoningEffort, enabledTools, executeTool, onState, onTranscript, onError, onEvent, onLevel }) {
-    Object.assign(this, { model, reasoningEffort, executeTool, onState, onTranscript, onError, onEvent, onLevel });
+  constructor({ model, reasoningEffort, enabledTools, microphoneId = getMicrophoneId(), executeTool, onState, onTranscript, onError, onEvent, onLevel }) {
+    Object.assign(this, { model, reasoningEffort, microphoneId, executeTool, onState, onTranscript, onError, onEvent, onLevel });
     this.enabledTools = enabledTools ? [...enabledTools] : undefined;
     this.state = 'idle'; this.micMuted = false; this.generation = 0; this.calls = new Set(); this.toolQueue = Promise.resolve();
   }
@@ -50,9 +50,11 @@ export class VoiceSession {
       const audioReady = Promise.all([this.player.connect(), resumeAudioContext(this.input)]);
       audioReady.catch(() => {});
       const devices = await navigator.mediaDevices.enumerateDevices();
-      const { stream } = await openMicrophone(preferredMicrophoneId(devices), { signal: this.abort.signal });
+      const deviceId = preferredMicrophoneId(devices, this.microphoneId);
+      const { stream, usedDefault } = await openMicrophone(deviceId, { signal: this.abort.signal });
       if (generation !== this.generation) { stream.getTracks().forEach(track => track.stop()); return; }
       this.stream = stream;
+      if (usedDefault && deviceId !== 'default') this.onError('The selected microphone is unavailable. Voice is using the system default.');
       await audioReady;
       if (generation !== this.generation) return;
       stream.getAudioTracks()[0].onended = () => this.fail(new Error('The microphone disconnected. Connect it and start again.'));

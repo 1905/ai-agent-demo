@@ -1,7 +1,9 @@
 import { allAgentTools, selectAgentTools } from './agent-tools.js';
 
 const storageKey = 'agent-lab-enabled-tools';
+const voiceStorageKey = 'agent-lab-voice-enabled-tools';
 let enabledTools = allAgentTools.map(tool => tool.name);
+let voiceEnabledTools = allAgentTools.map(tool => tool.name);
 try {
   const saved = localStorage.getItem(storageKey);
   if (saved !== null) {
@@ -10,18 +12,23 @@ try {
     enabledTools = selectAgentTools(Array.isArray(previous) ? previous.filter(name => allAgentTools.some(tool => tool.name === name)) : previous, true).map(tool => tool.name);
   }
 } catch { /* Keep all tools enabled if saved settings cannot be read. */ }
+try {
+  const saved = localStorage.getItem(voiceStorageKey);
+  if (saved !== null) voiceEnabledTools = selectAgentTools(JSON.parse(saved), true).map(tool => tool.name);
+} catch { /* Voice starts with all tools; it never inherits Chat's disabled tools. */ }
 
-export const getEnabledTools = () => [...enabledTools];
+export const getEnabledTools = (voice = false) => [...(voice ? voiceEnabledTools : enabledTools)];
 export const toolSettingsButton = `<button type="button" class="tool-settings-button" aria-label="Tool settings" aria-haspopup="dialog"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3" fill="var(--background, #0c0d0f)"/><circle cx="15" cy="17" r="3" fill="var(--background, #0c0d0f)"/></svg></button>`;
 
-export function mountToolSettings(root, { voiceConnected = () => false } = {}) {
+export function mountToolSettings(root, { voice = false, voiceConnected = () => false } = {}) {
   root.querySelector('.tool-panel .panel-heading > svg')?.remove();
   root.querySelector('.tool-panel .panel-heading').insertAdjacentHTML('beforeend', toolSettingsButton);
   root.querySelector('#calls-title').insertAdjacentHTML('beforeend', '<span class="tool-settings-count" aria-live="polite"></span>');
   const updateCount = () => {
+    const selected = getEnabledTools(voice);
     const count = root.querySelector('.tool-settings-count');
-    count.textContent = `${enabledTools.length}/${allAgentTools.length}`;
-    count.setAttribute('aria-label', `${enabledTools.length} of ${allAgentTools.length} tools selected`);
+    count.textContent = `${selected.length}/${allAgentTools.length}`;
+    count.setAttribute('aria-label', `${selected.length} of ${allAgentTools.length} tools selected`);
     count.title = 'Enabled for the next message or voice session';
   };
   updateCount();
@@ -29,13 +36,15 @@ export function mountToolSettings(root, { voiceConnected = () => false } = {}) {
   const dialog = root.querySelector('.tool-settings-dialog');
   const switches = [...dialog.querySelectorAll('input')];
   const refresh = () => {
-    switches.forEach(input => { input.checked = enabledTools.includes(input.name); });
+    switches.forEach(input => { input.checked = getEnabledTools(voice).includes(input.name); });
     dialog.querySelector('.tool-settings-note').textContent = voiceConnected() ? 'Reconnect Voice to apply changes.' : 'Applies to the next message or voice session.';
   };
   const save = () => {
-    enabledTools = switches.filter(input => input.checked).map(input => input.name);
+    const selected = switches.filter(input => input.checked).map(input => input.name);
+    if (voice) voiceEnabledTools = selected;
+    else enabledTools = selected;
     updateCount();
-    try { localStorage.setItem(storageKey, JSON.stringify(enabledTools)); } catch {}
+    try { localStorage.setItem(voice ? voiceStorageKey : storageKey, JSON.stringify(selected)); } catch {}
   };
   switches.forEach(input => { input.onchange = save; });
   dialog.querySelectorAll('[data-tools]').forEach(button => { button.onclick = () => { switches.forEach(input => { input.checked = button.dataset.tools === 'on'; }); save(); }; });

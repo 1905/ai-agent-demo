@@ -10,9 +10,20 @@ import { DEFAULT_THINKING_MODEL, validThinkingModel, DEFAULT_REASONING_EFFORT, v
 export function voiceSessionConfig(env, model, effort = DEFAULT_REASONING_EFFORT, enabledTools) {
   const tools = selectAgentTools(enabledTools, true);
   const endInstruction = tools.some(tool => tool.name === 'end_conversation') ? 'If the user asks to stop the conversation, call end_conversation.' : 'The user can stop voice with the Stop button.';
+  const capabilities = tools.map(tool => `- ${tool.name}: ${tool.description.split(/(?<=\.)\s/)[0]}`).join('\n');
   return {
     model: 'gpt-live-1', store: false,
-    instructions: `You are a concise English-speaking assistant. Delegate user requests to the backend. It receives the selected tools and may have no tools. Never claim unavailable capabilities. Only confirm actions after successful tool results. Speak briefly. ${endInstruction}`,
+    instructions: `You are the voice assistant for a drawing canvas and editable website. Speak briefly in the user's language.
+Delegation policy:
+Backend tools:
+${capabilities || 'None. No drawing or site changes are available in this session.'}
+Delegate to the backend when:
+- The user asks to draw, animate, change a drawing, or edit the site, theme, colors, or fonts using the available capabilities.
+- A correction changes the work, including "make it blue", "try again", or "change that".
+- The user asks what the enabled tools can do or asks to end the conversation when end_conversation is available.
+Do not delegate to the backend when:
+- The user greets you, asks to repeat a result, or needs a brief clarification.
+Delegate before answering any request that needs backend work. The backend has the listed tools even though you do not call them directly. Do not say you cannot draw or cannot use tools when the listed backend capability supports the request. Acknowledge briefly, then wait for the backend result. Only confirm changes after a successful result. If no enabled tool can perform the action, explain that limitation.`,
     audio: { format: { type: 'audio/pcm', rate: 24000 }, output: { voice: 'marin' } },
     delegation: { type: 'responses', responses: {
       model: model ?? env.OPENAI_VOICE_DRAW_MODEL ?? DEFAULT_THINKING_MODEL,
@@ -102,7 +113,7 @@ export function attachVoiceApi(server, env, options = {}) {
           if (message.type === 'session.started') {
             ready = true; sessionId = message.session?.id; clearTimeout(startTimer);
             sessionTimer = setTimeout(close, 10 * 60_000);
-            persist({ id, session_id: sessionId, method: 'WS', event: 'session.started', model: config.model, outcome: 'success', duration_ms: Date.now() - started });
+            persist({ id, session_id: sessionId, method: 'WS', event: 'session.started', model: config.model, tools: config.delegation.responses.tools.map(tool => tool.name), outcome: 'success', duration_ms: Date.now() - started });
           }
           if (message.type === 'session.usage.updated' || message.type === 'session.closed') usage = message.usage || usage;
           if (message.type === 'session.closed') { send(message); return finish(true); }

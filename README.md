@@ -49,9 +49,9 @@ Built with vanilla JavaScript, CSS, and Vite. No backend is needed for the lesso
 
 ## SVG drawer
 
-The settings button beside **Tool calls** opens a shared Chat/Voice tool list. Each tool has a switch; **All on** and **All off** make the demonstration quick. All tools start enabled. The browser remembers the selection across mode switches and reloads. Reset canvas keeps these settings.
+The settings button beside **Tool calls** opens the tool list for the current mode. Each tool has a switch; **All on** and **All off** make the demonstration quick. All tools start enabled. The browser remembers the selection across mode switches and reloads. Reset canvas keeps these settings.
 
-Chat sends the selected tools with the next message and keeps that selection for the whole turn. Voice uses the selection at connection time; reconnect to apply changes. `end_conversation` is marked Voice only and can also be disabled. The Stop button remains available. All off sends an empty tool list and the model can only answer with text. Simple logs show `tools: "None"`; raw logs show the exact provider tool list. The server owns and validates tool definitions, and disabled tool calls cannot execute.
+Chat and Voice save independent selections. Voice starts with all eight tools enabled, even when Chat has tools disabled. Chat sends the selected tools with the next message and keeps that selection for the whole turn. Voice uses the selection at connection time; reconnect to apply changes. `end_conversation` is marked Voice only and can also be disabled. The Stop button remains available. All off sends an empty tool list and the model can only answer with text. Simple logs show `tools: "None"`; raw logs show the exact provider tool list. The server owns and validates tool definitions, and disabled tool calls cannot execute.
 
 Live Chat and Voice can draw a complete scene in one call:
 
@@ -85,6 +85,10 @@ The command lesson ends after one API request and local execution. The weather l
 Choose **Voice** after **Chat**, or open `/#voice`. Click **Start voice**, allow microphone access, and speak. The same canvas and `draw_svg`, `update_svg`, and animated `draw_js` tools are used. Switching between Chat and Voice keeps the drawing and saved source. A new Voice session has separate conversation context; if it lacks the source, the model must explain before replacing the drawing. Reset clears the drawing; reloading the page starts a new drawing. There is no text input in Voice. The purple bubble from `voice_chat_mcp` reacts to assistant audio playback. It settles during silence and respects reduced-motion settings. A short live caption shows the current speech. Stop, Reset, and leaving the view release the microphone and audio playback.
 
 While Voice is connected, the microphone toggle appears next to Settings. Switch it off to mute your input while the agent continues speaking and drawing. Switch it on to resume. Each new session starts with the microphone on.
+
+Settings also contains a saved microphone selector and **Test microphone**. Automatic prefers AirPods when the browser exposes them; System default uses the browser default. A specific input applies to the next Voice connection. The local test displays live input levels without sending audio to the API or playing it through speakers. Stop the test, close Settings, or change views to release the input. Stop Voice before testing. Device names may appear only after microphone permission; the list refreshes after the test starts. If a saved input is missing, the app reports when it uses the system default instead.
+
+The selector uses [device enumeration](https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/enumerateDevices) and [device-change events](https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/devicechange_event). The level meter uses a local [audio analyser](https://developer.mozilla.org/en-US/docs/Web/API/AnalyserNode).
 
 The voice implementation uses microphone timeout/cancellation helpers and a PCM playback worklet. Capture and Live delegation use the shared drawing tools.
 

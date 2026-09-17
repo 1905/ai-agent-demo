@@ -258,7 +258,7 @@ function toggleVoice() {
   find('#draw-error').textContent = '';
   const mounted = root;
   let caption = '', speaker = '';
-  const enabledTools = getEnabledTools();
+  const enabledTools = getEnabledTools(true);
   const current = () => root === mounted && voiceSession === connection;
   const connection = new VoiceSession({
     model: getThinkingModel(),
@@ -317,8 +317,8 @@ export function mountDrawer(container, options = {}) {
       paint();
     };
   }
-  mountSettings(root, { onChange: paint });
-  mountToolSettings(root, { voiceConnected: () => Boolean(voiceSession && voiceSession.state !== 'idle') });
+  const unmountSettings = mountSettings(root, { onChange: paint, voiceConnected: () => Boolean(voiceSession && voiceSession.state !== 'idle') });
+  mountToolSettings(root, { voice: voiceView, voiceConnected: () => Boolean(voiceSession && voiceSession.state !== 'idle') });
   bindThemeControls();
   find('#draw-form').onsubmit = event => { event.preventDefault(); submit(find('#draw-prompt').value); };
   find('#draw-prompt').onkeydown = event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); submit(event.currentTarget.value); } };
@@ -367,5 +367,5 @@ export function mountDrawer(container, options = {}) {
     find('#draw-error').textContent = 'The drawing API is unavailable. Start the project server and reload.';
     paint();
   });
-  return () => { clearInterval(timer); cancelPending(); unmountBubble?.(); voiceSession?.dispose(); voiceSession = null; session++; controller?.abort(); drawingController?.abort(); animationController?.abort(); nativeCanvas?.remove(); nativeCapture = null; resizeObserver.disconnect(); busy = false; root = null; };
+  return () => { clearInterval(timer); cancelPending(); unmountSettings(); unmountBubble?.(); voiceSession?.dispose(); voiceSession = null; session++; controller?.abort(); drawingController?.abort(); animationController?.abort(); nativeCanvas?.remove(); nativeCapture = null; resizeObserver.disconnect(); busy = false; root = null; };
 }

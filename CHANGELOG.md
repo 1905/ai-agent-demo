@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Voice now saves its own tool selection and defaults to all eight tools, independent of disabled Chat tools. Its speech instructions describe enabled capabilities and explicitly delegate drawing, theme edits, and corrections to the tool-using backend. New connections record configured tool names in metadata.
+- Build and 55 Node tests pass. A real Live API smoke test with locally synthesized speech triggered `draw_svg`, submitted its result, continued the response, and closed with final usage and zero errors. Managed browser checks verified all eight tools in the actual Voice session payload, SVG rendering and result submission with simulated provider events, independent settings persistence, and desktop/mobile Settings layouts. The live smoke client saved the SVG to a file.
+
+- Added a saved microphone selector and local input-level test in Settings. Voice uses the selected device on its next connection. Automatic retains the AirPods preference; System default follows the browser default. Missing-device fallback is shown explicitly.
+- Microphone tests stop on Stop, dialog close, device selection, navigation, or page exit. Late permission grants release their tracks. Testing is unavailable during an active Voice connection.
+- Build and 55 Node tests pass. Managed browser checks verified the level meter with a synthetic tone and silence, saved device choice, actual Voice startup with a simulated connection, fallback/permission errors, late permission cleanup, device changes, and desktop/mobile layouts. Physical microphones and paid provider calls were not tested.
 - Removed the ReAct history slide and its animation. The history now covers original ChatGPT, WebGPT, Toolformer, and API function calling; lesson navigation contains fourteen pages.
 - Build, all 51 Node tests, and the updated history-sequence check pass. The final removal did not require a new browser run; preceding desktop/mobile history checks are recorded below.
 - Added original ChatGPT as the first history slide: November 30, 2022, text-only conversation without tools. A weather question gets a text reply explaining the lack of live access. The next slide explicitly returns to earlier tool-use research. Fifteen pages now lead into the lab.

@@ -2818,20 +2818,32 @@ html[lang="ru"] .lesson-copy h1 { letter-spacing: -1.6px; }
 .workspace-header .view-tabs { margin-right: auto; margin-left: auto; }
 .settings-dialog {
   max-width: 460px;
+  max-height: calc(100svh - 32px);
+  overflow-y: auto;
   padding: 28px;
   background: var(--surface-primary);
   color: var(--text-primary);
   border-color: var(--border-color);
 }
 .settings-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 28px; }
+.settings-dialog .settings-heading { margin-bottom: 20px; }
 .settings-heading h2 { margin: 0; font-size: 28px; }
 .settings-close { width: 44px; height: 44px; border-radius: 50%; font-size: 30px; color: var(--text-muted); }
 .settings-close:hover { background: var(--surface-selected); }
-.settings-dialog label { display: block; font-size: 18px; margin-bottom: 12px; }
+.settings-dialog label { display: block; font-size: 18px; margin-bottom: 8px; }
 .settings-dialog .reasoning-effort-label { margin-top: 22px; }
+.microphone-settings { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--border-color); }
+.settings-dialog .microphone-settings p { font-size: 14px; line-height: 1.4; margin: 10px 0 14px; overflow-wrap: anywhere; }
+.microphone-test-row { display: flex; align-items: center; gap: 16px; }
+#microphone-test { flex-shrink: 0; border: 1px solid var(--border-color); border-radius: 10px; padding: 12px 14px; font-size: 15px; color: var(--text-primary); background: var(--surface-secondary); }
+#microphone-test:hover { border-color: var(--accent-color); }
+#microphone-test:disabled { opacity: .45; cursor: default; }
+.microphone-meter { flex: 1; min-width: 40px; height: 12px; overflow: hidden; border-radius: 8px; background: var(--surface-secondary); }
+.microphone-meter > span { display: block; height: 100%; background: #96d1ad; transform: scaleX(0); transform-origin: left; }
+.settings-dialog #microphone-device { font-size: 18px; text-overflow: ellipsis; }
 .settings-dialog select {
   width: 100%;
-  padding: 14px 16px;
+  padding: 12px 14px;
   border: 1px solid var(--border-color);
   border-radius: 12px;
   background: var(--surface-secondary);
@@ -2841,6 +2853,7 @@ html[lang="ru"] .lesson-copy h1 { letter-spacing: -1.6px; }
   color-scheme: dark;
 }
 .settings-dialog p { margin: 14px 0 28px; font-size: 16px; line-height: 1.5; color: var(--text-muted); }
+.settings-dialog #thinking-model-note { margin: 12px 0 20px; }
 .settings-done { display: block; margin-left: auto; padding: 12px 24px; border-radius: 12px; font-size: 17px; background: var(--button-background); color: var(--button-text); }
 .panel-heading > .tool-settings-button { width: 42px; height: 42px; padding: 9px; border-radius: 12px; color: var(--text-secondary); }
 .tool-settings-button svg { width: 24px; height: 24px; }

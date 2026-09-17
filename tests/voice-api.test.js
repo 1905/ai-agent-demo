@@ -63,6 +63,8 @@ test('voice defaults to Terra with server-owned speech and tools; image outputs 
   assert.deepEqual(configuration.delegation.responses.reasoning, { effort: 'medium' });
   assert.deepEqual(configuration.delegation.responses.tools.slice(0, -1), agentTools);
   assert.equal(configuration.delegation.responses.parallel_tool_calls, false);
+  for (const tool of configuration.delegation.responses.tools) assert.ok(configuration.instructions.includes(`- ${tool.name}:`));
+  assert.match(configuration.instructions, /Delegate before answering/);
   send(client, { type: 'session.update', session: { delegation: { responses: { model: 'override' } } } });
   send(client, { type: 'session.input_audio.append', audio: 'AAAA' });
   await until(() => received.find(event => event.event?.type === 'response.output_item.done'));
@@ -85,6 +87,7 @@ test('voice defaults to Terra with server-owned speech and tools; image outputs 
     }
     await new Promise(resolve => setTimeout(resolve, 5));
   }
+  assert.deepEqual(records.find(record => record.event === 'session.started').tools, configuration.delegation.responses.tools.map(tool => tool.name));
   assert.equal(records.find(record => record.event === 'session.finished').usage.seconds, 3);
   assert.equal(records.find(record => record.event === 'response.completed').usage.total_tokens, 42);
   assert.equal(records.find(record => record.event === 'response.completed').model, 'gpt-5.6-terra');
@@ -150,7 +153,11 @@ test('Voice freezes selected tools at connection start and All off removes every
     await until(() => received.some(event => event.type === 'session.started'));
     const config = sent[0].session;
     assert.deepEqual(config.delegation.responses.tools.map(tool => tool.name), enabledTools);
-    if (!enabledTools.length) assert.match(config.delegation.responses.instructions, /No tools are available/);
+    if (!enabledTools.length) {
+      assert.match(config.delegation.responses.instructions, /No tools are available/);
+      assert.match(config.instructions, /None. No drawing or site changes/);
+      assert.doesNotMatch(config.instructions, /- draw_svg:/);
+    }
     send(client, { type: 'session.update', enabledTools: ['draw_svg'] });
     send(client, { type: 'session.close' });
     await until(() => received.some(event => event.type === 'voice.ended'));
